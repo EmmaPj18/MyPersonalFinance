@@ -1,0 +1,284 @@
+import type {
+  AccountType,
+  Currency,
+  DebtType,
+  DeductionCategory,
+  ExpenseNature,
+  ExpenseStatus,
+  IncomeKind,
+  IncomeSourceType,
+  PayFrequency,
+  PrivacyMode,
+  RecurrenceFrequency,
+  Scope,
+  UserRole,
+} from '@mypersonalfinance/shared';
+
+export interface Me {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  defaultCurrency: Currency;
+  defaultSplitPct: string | null;
+  household: { id: string; name: string; baseCurrency: Currency; privacyMode: PrivacyMode };
+}
+
+export interface Member {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  defaultSplitPct: string | null;
+  defaultCurrency: Currency;
+}
+
+export interface Household {
+  id: string;
+  name: string;
+  baseCurrency: Currency;
+  privacyMode: PrivacyMode;
+  members: Member[];
+  exMembers: { id: string; name: string; leftAt: string }[];
+}
+
+export interface Invitation {
+  id: string;
+  email: string;
+  role: UserRole;
+  expiresAt: string;
+}
+
+export interface Account {
+  id: string;
+  name: string;
+  type: AccountType;
+  currency: Currency;
+  ownerUserId: string | null;
+  openingBalance: string;
+  balance: string;
+  missingRate: boolean;
+  archived: boolean;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  color: string | null;
+  icon: string | null;
+  parentId: string | null;
+  defaultNature: ExpenseNature;
+  archived: boolean;
+}
+
+export interface DeductionType {
+  id: string;
+  name: string;
+  category: DeductionCategory;
+  archived: boolean;
+}
+
+export interface FxRate {
+  date: string;
+  fromCurrency: Currency;
+  toCurrency: Currency;
+  rate: string;
+}
+
+export interface Split {
+  userId: string;
+  sharePct: string | number;
+  shareAmount?: string;
+}
+
+export interface IncomeSource {
+  id: string;
+  name: string;
+  type: IncomeSourceType;
+  scope: Scope;
+  ownerUserId: string | null;
+  defaultCurrency: Currency;
+  payFrequency: PayFrequency;
+  accountId: string | null;
+  isActive: boolean;
+  deductionTemplates: { deductionTypeId: string; defaultAmount: string }[];
+}
+
+export interface IncomeEntry {
+  id: string;
+  sourceId: string;
+  sourceName: string;
+  sourceType: IncomeSourceType;
+  scope: Scope;
+  ownerUserId: string | null;
+  kind: IncomeKind;
+  payDate: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  grossAmount: string;
+  netAmount: string;
+  currency: Currency;
+  accountId: string | null;
+  notes: string | null;
+  deductions: { deductionTypeId: string; name: string; category: DeductionCategory; amount: string }[];
+  splits: Split[];
+}
+
+export interface Expense {
+  id: string;
+  description: string;
+  amount: string;
+  currency: Currency;
+  date: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  categoryColor: string | null;
+  accountId: string | null;
+  accountName: string | null;
+  paidByUserId: string | null;
+  nature: ExpenseNature;
+  scope: Scope;
+  ownerUserId: string | null;
+  recurringExpenseId: string | null;
+  status: ExpenseStatus;
+  splits: Split[];
+}
+
+export interface RecurringExpense {
+  id: string;
+  name: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  accountId: string | null;
+  amount: string;
+  currency: Currency;
+  scope: Scope;
+  ownerUserId: string | null;
+  frequency: RecurrenceFrequency;
+  dueDay: number;
+  startDate: string;
+  endDate: string | null;
+  isVariableAmount: boolean;
+  active: boolean;
+  splits: Split[];
+}
+
+export interface AuditEntry {
+  id: string;
+  action: string;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  at: string;
+  userName: string | null;
+}
+
+export interface BudgetView {
+  month: string;
+  currency: Currency;
+  budgetId: string | null;
+  items: {
+    id: string;
+    categoryId: string;
+    categoryName: string;
+    color: string | null;
+    nature: ExpenseNature;
+    scope: Scope;
+    ownerUserId: string | null;
+    plannedAmount: string;
+    actual: string;
+    pending: string;
+    remaining: string;
+  }[];
+  unbudgeted: { categoryId: string | null; categoryName: string; scope: Scope; ownerUserId: string | null; actual: string; pending: string }[];
+  suggestions: { categoryId: string; scope: Scope; ownerUserId: string | null; amount: string }[];
+  totals: { planned: string; actual: string; pending: string };
+  missingRates: string[];
+}
+
+export interface Goal {
+  id: string;
+  name: string;
+  targetAmount: string;
+  currency: Currency;
+  targetDate: string | null;
+  ownerUserId: string | null;
+  accountId: string | null;
+  archived: boolean;
+  saved: string;
+  remaining: string;
+  progressPct: string;
+  contributions: { id: string; amount: string; date: string; userId: string | null }[];
+}
+
+export interface Debt {
+  id: string;
+  name: string;
+  type: DebtType;
+  originalAmount: string;
+  currency: Currency;
+  interestRate: string | null;
+  minPayment: string | null;
+  dueDay: number | null;
+  startDate: string;
+  ownerUserId: string | null;
+  archived: boolean;
+  principalPaid: string;
+  interestPaid: string;
+  balance: string;
+  progressPct: string;
+  payments: { id: string; date: string; amount: string; principalPortion: string; interestPortion: string; expenseId: string | null }[];
+}
+
+export interface IncomeSummary {
+  gross: string;
+  deductions: string;
+  net: string;
+  effectiveDeductionRate: string;
+  bySource: { sourceId: string; name: string; type: IncomeSourceType; scope: Scope; ownerUserId: string | null; gross: string; deductions: string; net: string }[];
+  byPerson: { userId: string; gross: string; net: string; deductions: string }[];
+  byKind: { kind: IncomeKind; net: string }[];
+  deductionsByType: { deductionTypeId: string; name: string; category: DeductionCategory; amount: string }[];
+}
+
+export interface ExpenseSummary {
+  total: string;
+  paid: string;
+  pending: string;
+  fixed: string;
+  variable: string;
+  shared: string;
+  personal: string;
+  byCategory: { categoryId: string | null; name: string; color: string | null; total: string; fixed: string; variable: string; pending: string }[];
+  byPerson: { userId: string; total: string }[];
+}
+
+export interface MonthlyReport {
+  month: string;
+  currency: Currency;
+  view: 'household' | 'me';
+  income: IncomeSummary;
+  expenses: ExpenseSummary;
+  netFlow: string;
+  savingsRate: string;
+  missingRates: string[];
+}
+
+export interface YearlyReport {
+  year: number;
+  currency: Currency;
+  months: { month: string; gross: string; deductions: string; net: string; expenses: string; fixed: string; variable: string; netFlow: string }[];
+  totals: { income: IncomeSummary; expenses: ExpenseSummary; netFlow: string };
+  missingRates: string[];
+}
+
+export interface MemberBalances {
+  currency: Currency;
+  members: { userId: string; paid: string; share: string; balance: string }[];
+  settlements: { fromUserId: string; toUserId: string; amount: string }[];
+  missingRates: string[];
+}
+
+export interface LeavePreview {
+  moves: Record<string, number>;
+  stays: Record<string, number>;
+}
