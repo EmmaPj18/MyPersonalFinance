@@ -1,0 +1,19 @@
+name: mypersonalfinance-dev
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mypersonalfinance
+      POSTGRES_PASSWORD: change-me
+      POSTGRES_DB: mypersonalfinance
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mypersonalfinance"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  pgdata-dev:
