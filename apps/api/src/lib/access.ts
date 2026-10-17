@@ -40,6 +40,23 @@ export const assertMembers = async (db: DbOrTx, householdId: string, userIds: (s
   if (rows.length !== ids.length) throw badRequest('Alguno de los miembros indicados no pertenece al hogar');
 };
 
+/**
+ * Ensures each id is a member with an account. Members without an account (managed) only take
+ * part in what's shared by the household, so they can't own personal records.
+ */
+export const assertOwners = async (db: DbOrTx, householdId: string, userIds: (string | null | undefined)[]) => {
+  const ids = [...new Set(userIds.filter((v): v is string => Boolean(v)))];
+  if (ids.length === 0) return;
+  const rows = await db
+    .select({ id: users.id, status: users.accountStatus })
+    .from(users)
+    .where(and(eq(users.householdId, householdId), inArray(users.id, ids)));
+  if (rows.length !== ids.length) throw badRequest('Alguno de los miembros indicados no pertenece al hogar');
+  if (rows.some((r) => r.status !== 'active')) {
+    throw badRequest('Un miembro sin cuenta solo participa en lo del hogar; no puede tener registros personales');
+  }
+};
+
 /** Ensures an optional reference (account, category...) belongs to the household. */
 export const assertInHousehold = async (
   db: DbOrTx,

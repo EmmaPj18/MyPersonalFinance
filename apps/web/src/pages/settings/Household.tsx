@@ -1,6 +1,6 @@
 import { USER_ROLES, type Currency, type PrivacyMode, type UserRole } from '@mypersonalfinance/shared';
 import { useQueryClient } from '@tanstack/react-query';
-import { Copy, LogOut, Trash2, UserPlus } from 'lucide-react';
+import { Copy, LogOut, Mail, Trash2, UserPlus, UserRoundPlus } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 import { CurrencySelect } from '../../components/finance';
@@ -38,6 +38,10 @@ export const HouseholdSettings = () => {
   const [inviteRole, setInviteRole] = useState<UserRole>('member');
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [leaveOpen, setLeaveOpen] = useState(false);
+  const [managedName, setManagedName] = useState('');
+  const [claim, setClaim] = useState<{ id: string; name: string } | null>(null);
+  const [claimEmail, setClaimEmail] = useState('');
+  const [claimUrl, setClaimUrl] = useState<string | null>(null);
   const preview = useLeavePreview(leaveOpen);
 
   const refreshAll = () => qc.invalidateQueries();
@@ -45,6 +49,11 @@ export const HouseholdSettings = () => {
   const updateMember = useApiMutation(({ id, payload }: { id: string; payload: unknown }) => api.patch(`/household/members/${id}`, payload), ['household', 'me']);
   const removeMember = useApiMutation((id: string) => api.del(`/household/members/${id}`), ['household']);
   const transfer = useApiMutation((userId: string) => api.post('/household/transfer-ownership', { userId }), ['household', 'me']);
+  const addManaged = useApiMutation((name: string) => api.post('/household/members', { name }), ['household']);
+  const inviteClaim = useApiMutation(
+    ({ id, email }: { id: string; email: string }) => api.post<{ url: string }>(`/household/members/${id}/invite`, { email }),
+    ['invitations'],
+  );
   const invite = useApiMutation((payload: unknown) => api.post<{ url: string }>('/household/invitations', payload), ['invitations']);
   const revoke = useApiMutation((id: string) => api.del(`/household/invitations/${id}`), ['invitations']);
   const leave = useApiMutation(() => api.post('/household/leave'), []);
@@ -128,13 +137,30 @@ export const HouseholdSettings = () => {
             {h.members.map((m) => (
               <tr key={m.id}>
                 <Td>
-                  <p className="font-medium">
-                    {m.name} {m.id === me.id && <Badge tone="primary">Tú</Badge>}
-                  </p>
-                  <p className="text-xs text-muted">{m.email}</p>
+                  {m.accountStatus === 'managed' && isOwner ? (
+                    <Input
+                      aria-label={`Nombre de ${m.name}`}
+                      className="!h-8 max-w-56"
+                      defaultValue={m.name}
+                      onBlur={(e) => e.target.value && e.target.value !== m.name && updateMember.mutate({ id: m.id, payload: { name: e.target.value } })}
+                    />
+                  ) : (
+                    <p className="font-medium">
+                      {m.name} {m.id === me.id && <Badge tone="primary">Tú</Badge>}
+                    </p>
+                  )}
+                  {m.accountStatus === 'managed' ? (
+                    <p className="mt-1">
+                      <Badge tone="warning">Sin cuenta</Badge>
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted">{m.email}</p>
+                  )}
                 </Td>
                 <Td>
-                  {isOwner ? (
+                  {m.accountStatus === 'managed' ? (
+                    <span className="text-xs text-muted">Solo lo del hogar</span>
+                  ) : isOwner ? (
                     <Select
                       aria-label={`Rol de ${m.name}`}
                       className="!h-8 !w-auto text-xs"
@@ -173,7 +199,21 @@ export const HouseholdSettings = () => {
                 <Td className="text-right whitespace-nowrap">
                   {isOwner && m.id !== me.id && (
                     <>
-                      {m.role !== 'owner' && (
+                      {m.accountStatus === 'managed' && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon={<Mail className="size-4" />}
+                          onClick={() => {
+                            setClaim({ id: m.id, name: m.name });
+                            setClaimEmail('');
+                            setClaimUrl(null);
+                          }}
+                        >
+                          Invitar a tomar la cuenta
+                        </Button>
+                      )}
+                      {m.role !== 'owner' && m.accountStatus === 'active' && (
                         <Button size="sm" variant="ghost" onClick={() => confirm(`¿Transferir la propiedad del hogar a ${m.name}? Pasarás a ser miembro.`) && transfer.mutate(m.id)}>
                           Hacer dueño
                         </Button>
@@ -181,8 +221,11 @@ export const HouseholdSettings = () => {
                       <IconButton
                         label="Quitar del hogar"
                         onClick={() =>
-                          confirm(`¿Quitar a ${m.name}? Se llevará sus datos personales a un hogar propio; lo común se queda aquí.`) &&
-                          removeMember.mutate(m.id)
+                          confirm(
+                            m.accountStatus === 'managed'
+                              ? `¿Eliminar a ${m.name}? Solo es posible si no participa en gastos o ingresos.`
+                              : `¿Quitar a ${m.name}? Se llevará sus datos personales a un hogar propio; lo común se queda aquí.`,
+                          ) && removeMember.mutate(m.id)
                         }
                         icon={<Trash2 className="size-4" />}
                       />
@@ -193,6 +236,26 @@ export const HouseholdSettings = () => {
             ))}
           </tbody>
         </Table>
+        {isOwner && (
+          <form
+            className="flex flex-wrap items-end gap-2 border-t border-border px-4 py-3 sm:px-5"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              await addManaged.mutateAsync(managedName);
+              setManagedName('');
+            }}
+          >
+            <Field label="Agregar miembro sin cuenta" hint="Participa en el presupuesto del hogar; más adelante puedes invitarle a tomar su cuenta." className="min-w-60 flex-1">
+              {(id) => <Input id={id} required placeholder="Nombre" value={managedName} onChange={(e) => setManagedName(e.target.value)} />}
+            </Field>
+            <Button type="submit" variant="secondary" icon={<UserRoundPlus className="size-4" />} loading={addManaged.isPending}>
+              Agregar
+            </Button>
+            <div className="w-full">
+              <ErrorBanner error={addManaged.error} />
+            </div>
+          </form>
+        )}
         {h.exMembers.length > 0 && (
           <p className="px-4 py-3 text-xs text-muted sm:px-5">
             Ex-miembros: {h.exMembers.map((m) => `${m.name} (salió el ${formatDate(m.leftAt)})`).join(', ')}
@@ -258,6 +321,41 @@ export const HouseholdSettings = () => {
           </Button>
         </div>
       </Card>
+
+      <Modal open={claim !== null} onClose={() => setClaim(null)} title={`Invitar a tomar la cuenta de ${claim?.name ?? ''}`}>
+        {claim && (
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const res = await inviteClaim.mutateAsync({ id: claim.id, email: claimEmail });
+              setClaimUrl(res.url);
+            }}
+          >
+            <p className="text-sm text-muted">
+              La persona crea su cuenta (o usa la que ya tiene) y conserva todo lo registrado a nombre de {claim.name}.
+            </p>
+            <ErrorBanner error={inviteClaim.error} />
+            <Field label="Email">{(id) => <Input id={id} type="email" required value={claimEmail} onChange={(e) => setClaimEmail(e.target.value)} />}</Field>
+            {claimUrl ? (
+              <Notice tone="primary">
+                <div className="flex flex-wrap items-center gap-2">
+                  <code className="break-all text-xs">{claimUrl}</code>
+                  <Button size="sm" variant="secondary" icon={<Copy className="size-3.5" />} onClick={() => navigator.clipboard?.writeText(claimUrl)}>
+                    Copiar
+                  </Button>
+                </div>
+              </Notice>
+            ) : (
+              <div className="flex justify-end">
+                <Button type="submit" loading={inviteClaim.isPending}>
+                  Generar invitación
+                </Button>
+              </div>
+            )}
+          </form>
+        )}
+      </Modal>
 
       <Modal
         open={leaveOpen}

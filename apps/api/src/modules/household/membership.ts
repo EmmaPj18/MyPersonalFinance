@@ -236,3 +236,42 @@ const detachForeignReferences = async (tx: Tx, householdId: string) => {
     from debts d, expenses e
     where d.id = p.debt_id and e.id = p.expense_id and d.household_id = ${householdId} and e.household_id <> ${householdId}`);
 };
+
+/** Split tables keyed by (record, user): merging must add up shares instead of duplicating rows. */
+const SPLIT_TABLES = [
+  { table: 'expense_splits', key: 'expense_id', extra: ', share_amount = t.share_amount + m.share_amount' },
+  { table: 'income_splits', key: 'income_entry_id', extra: '' },
+  { table: 'recurring_expense_splits', key: 'recurring_expense_id', extra: '' },
+] as const;
+
+/**
+ * Hands everything that references a managed member (splits, "paid by", history...) over to a
+ * real user, then deletes the managed member. Used when someone claims a managed member's
+ * account with an account they already had.
+ */
+export const mergeManagedMember = async (tx: Tx, managedId: string, userId: string) => {
+  for (const { table, key, extra } of SPLIT_TABLES) {
+    const t = sql.identifier(table);
+    const k = sql.identifier(key);
+    // Same record already split with the real user: add the managed member's share to it.
+    await tx.execute(sql`
+      update ${t} t set share_pct = t.share_pct + m.share_pct${sql.raw(extra)}
+      from ${t} m
+      where m.user_id = ${managedId} and t.user_id = ${userId} and t.${k} = m.${k}`);
+    await tx.execute(sql`
+      delete from ${t} m using ${t} t
+      where m.user_id = ${managedId} and t.user_id = ${userId} and t.${k} = m.${k}`);
+  }
+  // Every other foreign key to users, discovered from the catalog so new tables are covered too.
+  const fks = await tx.execute<{ table_name: string; column_name: string }>(sql`
+    select c.conrelid::regclass::text as table_name, a.attname as column_name
+    from pg_constraint c
+    join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any(c.conkey)
+    where c.contype = 'f' and c.confrelid = 'users'::regclass`);
+  for (const { table_name, column_name } of fks.rows) {
+    await tx.execute(
+      sql`update ${sql.identifier(table_name)} set ${sql.identifier(column_name)} = ${userId} where ${sql.identifier(column_name)} = ${managedId}`,
+    );
+  }
+  await tx.delete(users).where(eq(users.id, managedId));
+};

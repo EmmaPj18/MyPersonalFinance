@@ -68,7 +68,8 @@ export default fp(async (app: FastifyInstance) => {
       .innerJoin(households, eq(households.id, users.householdId))
       .where(and(eq(sessions.id, hashToken(unsigned.value)), gt(sessions.expiresAt, new Date())))
       .limit(1);
-    request.user = row ?? null;
+    // Only members with an account have sessions; email is always set for them.
+    request.user = row?.email ? { ...row, email: row.email } : null;
   });
 
   app.decorate('authenticate', async (request: FastifyRequest) => {

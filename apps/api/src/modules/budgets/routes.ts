@@ -4,7 +4,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { budgetItems, budgets, categories, recurringExpenses } from '../../db/schema';
-import { assertCanEdit, assertMembers, canSee } from '../../lib/access';
+import { assertCanEdit, assertMembers, assertOwners, canSee } from '../../lib/access';
 import { monthRange, previousMonth } from '../../lib/dates';
 import { badRequest, notFound } from '../../lib/errors';
 import { FxResolver } from '../../lib/fx';
@@ -139,7 +139,7 @@ export const budgetRoutes: FastifyPluginAsyncZod = async (app) => {
       const input = request.body;
       const items = input.items.map((i) => ({ ...i, ownerUserId: i.scope === 'personal' ? (i.ownerUserId ?? user.id) : null }));
       for (const i of items) assertCanEdit(user, i.ownerUserId);
-      await assertMembers(db, user.householdId, items.map((i) => i.ownerUserId));
+      await assertOwners(db, user.householdId, items.map((i) => i.ownerUserId));
       const categoryIds = [...new Set(items.map((i) => i.categoryId))];
       if (categoryIds.length) {
         const found = await db

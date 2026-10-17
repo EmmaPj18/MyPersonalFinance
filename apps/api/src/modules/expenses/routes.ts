@@ -8,7 +8,7 @@ import {
 import { and, desc, eq, gte, inArray, lte, type SQL } from 'drizzle-orm';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { accounts, auditLog, categories, expenses, expenseSplits, users } from '../../db/schema';
-import { assertCanEdit, assertInHousehold, assertMembers, resolveOwner, resolveSplits, visibilityFilter } from '../../lib/access';
+import { assertCanEdit, assertInHousehold, assertMembers, assertOwners, resolveOwner, resolveSplits, visibilityFilter } from '../../lib/access';
 import { writeAudit } from '../../lib/audit';
 import { monthRange } from '../../lib/dates';
 import { notFound } from '../../lib/errors';
@@ -90,7 +90,7 @@ export const expenseRoutes: FastifyPluginAsyncZod = async (app) => {
     const user = currentUser(request);
     const { splits: splitInput, ...input } = request.body;
     const ownerUserId = resolveOwner(user, input.scope, input.ownerUserId);
-    await assertMembers(db, user.householdId, [ownerUserId]);
+    await assertOwners(db, user.householdId, [ownerUserId]);
     assertCanEdit(user, ownerUserId);
     await validateRefs(user, input);
     const splits = input.scope === 'shared' ? await resolveSplits(db, user.householdId, splitInput) : [];
@@ -121,7 +121,7 @@ export const expenseRoutes: FastifyPluginAsyncZod = async (app) => {
       assertCanEdit(user, existing.ownerUserId);
       const { splits: splitInput, ...input } = request.body;
       const ownerUserId = resolveOwner(user, input.scope, input.ownerUserId);
-      await assertMembers(db, user.householdId, [ownerUserId]);
+      await assertOwners(db, user.householdId, [ownerUserId]);
       assertCanEdit(user, ownerUserId);
       await validateRefs(user, input);
       // Keep the current split when editing a shared expense without sending a new one.

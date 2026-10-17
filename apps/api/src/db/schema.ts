@@ -17,6 +17,7 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 import {
+  ACCOUNT_STATUSES,
   ACCOUNT_TYPES,
   CURRENCIES,
   DEBT_TYPES,
@@ -35,6 +36,7 @@ import {
 
 export const currencyEnum = pgEnum('currency', CURRENCIES);
 export const userRoleEnum = pgEnum('user_role', USER_ROLES);
+export const accountStatusEnum = pgEnum('account_status', ACCOUNT_STATUSES);
 export const privacyModeEnum = pgEnum('privacy_mode', PRIVACY_MODES);
 export const scopeEnum = pgEnum('scope', SCOPES);
 export const expenseNatureEnum = pgEnum('expense_nature', EXPENSE_NATURES);
@@ -81,9 +83,11 @@ export const users = pgTable(
   'users',
   {
     id: id(),
-    email: varchar('email', { length: 254 }).notNull(),
-    passwordHash: text('password_hash').notNull(),
+    /** Null for members without an account (managed). */
+    email: varchar('email', { length: 254 }),
+    passwordHash: text('password_hash'),
     name: varchar('name', { length: 120 }).notNull(),
+    accountStatus: accountStatusEnum('account_status').notNull().default('active'),
     defaultCurrency: currencyEnum('default_currency').notNull().default('DOP'),
     householdId: uuid('household_id')
       .notNull()
@@ -133,6 +137,8 @@ export const householdInvitations = pgTable(
     invitedBy: uuid('invited_by')
       .notNull()
       .references(() => users.id),
+    /** Managed member whose account the invitee takes over. */
+    memberId: uuid('member_id').references(() => users.id, { onDelete: 'cascade' }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     acceptedAt: timestamp('accepted_at', { withTimezone: true }),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),

@@ -43,7 +43,7 @@ const job: IncomeSource = {
 
 const renderForm = (onSubmit = vi.fn().mockResolvedValue(undefined), defaultKind?: 'bonus') => {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
-  const household: Household = { ...me.household, members: [{ ...me, defaultSplitPct: null }], exMembers: [] };
+  const household: Household = { ...me.household, members: [{ ...me, defaultSplitPct: null, accountStatus: 'active' }], exMembers: [] };
   qc.setQueryData(['household'], household);
   qc.setQueryData(['accounts'], []);
   render(

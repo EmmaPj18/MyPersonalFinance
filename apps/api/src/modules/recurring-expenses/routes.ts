@@ -10,7 +10,7 @@ import { and, eq, gte, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { accounts, categories, expenses, households, recurringExpenses, recurringExpenseSplits } from '../../db/schema';
-import { assertCanEdit, assertInHousehold, assertMembers, resolveOwner, resolveSplits, visibilityFilter } from '../../lib/access';
+import { assertCanEdit, assertInHousehold, assertMembers, assertOwners, resolveOwner, resolveSplits, visibilityFilter } from '../../lib/access';
 import { writeAudit } from '../../lib/audit';
 import { addDays, todayIn, toIsoDate } from '../../lib/dates';
 import { runRecurring } from '../../jobs/recurring';
@@ -90,7 +90,7 @@ export const recurringExpenseRoutes: FastifyPluginAsyncZod = async (app) => {
   const save = async (user: AuthUser, body: typeof recurringExpenseInputSchema._output, id?: string) => {
     const { splits: splitInput, linkExpenseId, ...input } = body;
     const ownerUserId = resolveOwner(user, input.scope, input.ownerUserId);
-    await assertMembers(db, user.householdId, [ownerUserId]);
+    await assertOwners(db, user.householdId, [ownerUserId]);
     assertCanEdit(user, ownerUserId);
     await assertInHousehold(db, categories, input.categoryId, user.householdId, 'categoría');
     await assertInHousehold(db, accounts, input.accountId, user.householdId, 'cuenta');
@@ -228,7 +228,7 @@ export const recurringExpenseRoutes: FastifyPluginAsyncZod = async (app) => {
       assertCanEdit(user, existing.ownerUserId);
       const input = request.body;
       const ownerUserId = input.scope === 'personal' ? input.ownerUserId! : null;
-      await assertMembers(db, user.householdId, [ownerUserId]);
+      await assertOwners(db, user.householdId, [ownerUserId]);
       const splits = input.scope === 'shared' && input.splits?.length ? await resolveSplits(db, user.householdId, input.splits) : [];
 
       return db.transaction(async (tx) => {

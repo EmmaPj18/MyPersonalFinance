@@ -1,4 +1,5 @@
 import type {
+  AccountStatus,
   AccountType,
   Currency,
   DebtType,
@@ -28,10 +29,12 @@ export interface Me {
 export interface Member {
   id: string;
   name: string;
-  email: string;
+  /** Null for members without an account. */
+  email: string | null;
   role: UserRole;
   defaultSplitPct: string | null;
   defaultCurrency: Currency;
+  accountStatus: AccountStatus;
 }
 
 export interface Household {

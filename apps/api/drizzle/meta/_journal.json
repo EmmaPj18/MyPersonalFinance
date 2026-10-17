@@ -15,6 +15,13 @@
       "when": 1792254523566,
       "tag": "0001_scheduling",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792255524939,
+      "tag": "0002_managed_members",
+      "breakpoints": true
     }
   ]
 }

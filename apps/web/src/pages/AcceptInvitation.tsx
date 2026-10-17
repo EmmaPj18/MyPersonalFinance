@@ -14,6 +14,8 @@ interface InvitationInfo {
   householdName: string;
   invitedByName: string;
   hasAccount: boolean;
+  /** Set when the invitation is to take over a member without an account. */
+  memberName: string | null;
 }
 
 export const AcceptInvitationPage = () => {
@@ -45,8 +47,9 @@ export const AcceptInvitationPage = () => {
     setLoading(true);
     setError(null);
     try {
-      await api.post(`/invitations/${token}/accept`, inv.hasAccount ? {} : form);
-      await qc.invalidateQueries();
+      await api.post(`/invitations/${token}/accept`, inv.hasAccount ? {} : { ...form, name: form.name.trim() || undefined });
+      // The invitation is used now: refresh everything except it.
+      await qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'invitation' });
       navigate('/', { replace: true });
     } catch (err) {
       setError(err);
@@ -58,7 +61,11 @@ export const AcceptInvitationPage = () => {
   return (
     <AuthShell
       title={`Únete a "${inv.householdName}"`}
-      subtitle={`${inv.invitedByName} te invitó como ${ROLE_LABELS[inv.role].toLowerCase()} (${inv.email}).`}
+      subtitle={
+        inv.memberName
+          ? `${inv.invitedByName} te invitó a tomar la cuenta de "${inv.memberName}" (${inv.email}). Conservarás todo lo que ya está registrado a ese nombre.`
+          : `${inv.invitedByName} te invitó como ${ROLE_LABELS[inv.role].toLowerCase()} (${inv.email}).`
+      }
     >
       <div className="flex flex-col gap-4">
         <ErrorBanner error={error} />
@@ -83,7 +90,17 @@ export const AcceptInvitationPage = () => {
           )
         ) : (
           <form onSubmit={accept} className="flex flex-col gap-4">
-            <Field label="Tu nombre">{(id) => <Input id={id} required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />}</Field>
+            <Field label="Tu nombre">
+              {(id) => (
+                <Input
+                  id={id}
+                  required={!inv.memberName}
+                  placeholder={inv.memberName ?? undefined}
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                />
+              )}
+            </Field>
             <Field label="Contraseña" hint="Mínimo 8 caracteres">
               {(id) => (
                 <Input id={id} type="password" required minLength={8} autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />

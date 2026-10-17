@@ -6,6 +6,10 @@ export type Currency = (typeof CURRENCIES)[number];
 export const USER_ROLES = ['owner', 'member', 'viewer'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
+/** active = has a login; managed = member without an account, handled by the household. */
+export const ACCOUNT_STATUSES = ['active', 'managed'] as const;
+export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
+
 export const PRIVACY_MODES = ['open', 'aggregated'] as const;
 export type PrivacyMode = (typeof PRIVACY_MODES)[number];
 

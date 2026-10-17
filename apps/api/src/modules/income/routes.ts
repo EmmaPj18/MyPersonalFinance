@@ -22,7 +22,7 @@ import {
   incomeSplits,
   sourceDeductionTemplates,
 } from '../../db/schema';
-import { assertCanEdit, assertInHousehold, assertMembers, resolveOwner, resolveSplits, visibilityFilter } from '../../lib/access';
+import { assertCanEdit, assertInHousehold, assertMembers, assertOwners, resolveOwner, resolveSplits, visibilityFilter } from '../../lib/access';
 import { badRequest, notFound } from '../../lib/errors';
 import { addDays, monthRange, todayIn } from '../../lib/dates';
 import { runRecurring } from '../../jobs/recurring';
@@ -98,7 +98,7 @@ export const incomeRoutes: FastifyPluginAsyncZod = async (app) => {
 
   const saveSource = async (user: AuthUser, input: typeof incomeSourceInputSchema._output, id?: string) => {
     const ownerUserId = resolveOwner(user, input.scope, input.ownerUserId);
-    await assertMembers(db, user.householdId, [ownerUserId]);
+    await assertOwners(db, user.householdId, [ownerUserId]);
     assertCanEdit(user, ownerUserId);
     await assertInHousehold(db, accounts, input.accountId, user.householdId, 'cuenta');
     const templates = input.deductionTemplates;
