@@ -58,7 +58,11 @@ Edita `apps/api/src/db/schema.ts` y genera la migración:
 pnpm --filter @mypersonalfinance/api db:generate
 ```
 
-## Producción con Docker
+## Despliegue en el Home Server (CI/CD)
+
+Cada merge a `main` pasa CI, publica las imágenes en GHCR y actualiza el stack en Portainer; la app queda en https://mpf.emmapj18.dev. Configuración, migración de datos y respaldos: [`deploy/README.md`](deploy/README.md).
+
+## Producción con Docker (local)
 
 1. En `.env` define al menos `POSTGRES_PASSWORD`, `SESSION_SECRET` (`openssl rand -base64 48`), `WEB_ORIGIN` (URL pública, usada en los enlaces de invitación) y `WEB_PORT`. Si se sirve por HTTPS, `COOKIE_SECURE=true`.
 2. Construye y levanta:

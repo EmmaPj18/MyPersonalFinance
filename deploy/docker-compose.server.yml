@@ -1,0 +1,46 @@
+# Production stack for the home server (deployed to Portainer by .github/workflows/deploy.yml).
+# Images come from GHCR; variables are stored in the Portainer stack.
+name: mypersonalfinance
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mypersonalfinance
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: mypersonalfinance
+      TZ: ${TZ:-America/Santo_Domingo}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mypersonalfinance"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+
+  api:
+    image: ghcr.io/emmapj18/mypersonalfinance-api:${APP_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://mypersonalfinance:${POSTGRES_PASSWORD}@db:5432/mypersonalfinance
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      WEB_ORIGIN: ${WEB_ORIGIN:-https://mpf.emmapj18.dev}
+      TZ: ${TZ:-America/Santo_Domingo}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    image: ghcr.io/emmapj18/mypersonalfinance-web:${APP_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    # The Cloudflare Tunnel public hostname points to http://<server-ip>:${WEB_PORT}.
+    ports:
+      - "${WEB_PORT:-8085}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
