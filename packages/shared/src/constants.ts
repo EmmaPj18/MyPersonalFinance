@@ -90,5 +90,16 @@ export type FxPreferredSource = (typeof FX_PREFERRED_SOURCES)[number];
 export const FX_SIDES = ['buy', 'sell', 'mid'] as const;
 export type FxSide = (typeof FX_SIDES)[number];
 
+/** Where a transaction waiting for review came from. */
+export const INBOX_SOURCES = ['csv', 'xlsx', 'email'] as const;
+export type InboxSource = (typeof INBOX_SOURCES)[number];
+export const INBOX_STATUSES = ['pending', 'imported', 'ignored'] as const;
+export type InboxStatus = (typeof INBOX_STATUSES)[number];
+/** What a reviewed transaction becomes. */
+export const INBOX_KINDS = ['expense', 'income', 'transfer', 'ignore'] as const;
+export type InboxKind = (typeof INBOX_KINDS)[number];
+export const DIRECTIONS = ['debit', 'credit'] as const;
+export type Direction = (typeof DIRECTIONS)[number];
+
 export const DEBT_TYPES = ['loan', 'credit_card', 'mortgage', 'other'] as const;
 export type DebtType = (typeof DEBT_TYPES)[number];

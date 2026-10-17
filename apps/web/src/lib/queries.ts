@@ -17,6 +17,9 @@ import type {
   Invitation,
   LeavePreview,
   Me,
+  CategorizationRule,
+  InboxItem,
+  Transfer,
   MarketRates,
   MemberBalances,
   MonthlyReport,
@@ -77,6 +80,11 @@ export const useUpcomingExpenses = (days = 30) =>
     queryKey: ['recurring-expenses', 'upcoming', days],
     queryFn: () => api.get<UpcomingExpense[]>('/recurring-expenses/upcoming', { days }),
   });
+
+export const useInbox = () => useQuery({ queryKey: ['inbox'], queryFn: () => api.get<InboxItem[]>('/inbox') });
+export const useRules = () =>
+  useQuery({ queryKey: ['rules'], queryFn: () => api.get<CategorizationRule[]>('/categorization-rules') });
+export const useTransfers = () => useQuery({ queryKey: ['transfers'], queryFn: () => api.get<Transfer[]>('/transfers') });
 
 export const useBudget = (year: number) =>
   useQuery({ queryKey: ['budget', year], queryFn: () => api.get<AnnualBudget>(`/budgets/${year}`) });

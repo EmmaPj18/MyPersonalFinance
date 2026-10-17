@@ -222,7 +222,11 @@ const remapDeductionTypes = async (tx: Tx, householdId: string) => {
 /** Nulls out optional references from `householdId` rows to records of another household. */
 const detachForeignReferences = async (tx: Tx, householdId: string) => {
   const ownAccounts = sql`(select id from accounts where household_id = ${householdId})`;
-  for (const table of ['income_sources', 'income_entries', 'expenses', 'recurring_expenses', 'savings_goals']) {
+  // Transfers between the household's accounts can't involve an account that moved away.
+  await tx.execute(sql`
+    delete from account_transfers
+    where household_id = ${householdId} and (from_account_id not in ${ownAccounts} or to_account_id not in ${ownAccounts})`);
+  for (const table of ['income_sources', 'income_entries', 'expenses', 'recurring_expenses', 'savings_goals', 'transaction_inbox']) {
     await tx.execute(sql`
       update ${sql.identifier(table)} set account_id = null
       where household_id = ${householdId} and account_id is not null and account_id not in ${ownAccounts}`);
