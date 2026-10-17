@@ -27,7 +27,8 @@ export const IncomePage = () => {
   const saveSource = useApiMutation(
     ({ id, payload }: { id?: string; payload: unknown }) =>
       id ? api.put(`/income-sources/${id}`, payload) : api.post('/income-sources', payload),
-    ['income-sources'],
+    // Saving a source can register scheduled payments right away.
+    ['income-sources', 'income-entries'],
   );
   const deleteSource = useApiMutation((id: string) => api.del(`/income-sources/${id}`), ['income-sources', 'income-entries']);
   const saveEntry = useApiMutation(
