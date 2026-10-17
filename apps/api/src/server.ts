@@ -2,6 +2,7 @@ import { buildApp } from './app';
 import { loadConfig } from './config';
 import { createDb } from './db/client';
 import { runMigrations } from './db/migrate';
+import { runFxSync } from './jobs/fx';
 import { runRecurring } from './jobs/recurring';
 import { startScheduler } from './jobs/scheduler';
 
@@ -13,7 +14,15 @@ if (process.env.RUN_MIGRATIONS === 'true') {
 
 const { db, pool } = createDb(config.DATABASE_URL);
 const app = await buildApp({ config, db });
-const stopScheduler = startScheduler(db, [{ name: 'recurring', everyMinutes: 60, run: (tx) => runRecurring(tx) }], app.log);
+const stopScheduler = startScheduler(
+  db,
+  [
+    { name: 'recurring', everyMinutes: 60, run: (tx) => runRecurring(tx) },
+    // BCRD publishes once per business day; Infodolar changes during the day.
+    { name: 'fx', everyMinutes: 360, run: (tx) => runFxSync(tx) },
+  ],
+  app.log,
+);
 
 const shutdown = async () => {
   stopScheduler();

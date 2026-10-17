@@ -2,6 +2,10 @@ import type {
   AccountStatus,
   AccountType,
   BudgetLineKind,
+  FxPreferredSource,
+  FxSide,
+  ImportMapping,
+  InboxKind,
   Currency,
   DebtType,
   DeductionCategory,
@@ -88,6 +92,76 @@ export interface FxRate {
   fromCurrency: Currency;
   toCurrency: Currency;
   rate: string;
+}
+
+export interface MarketQuote {
+  source: 'bcrd' | 'ecb' | 'erapi' | 'infodolar';
+  entity: string;
+  date: string;
+  fromCurrency: Currency;
+  toCurrency: Currency;
+  buy: string | null;
+  sell: string | null;
+  mid: string;
+}
+
+export interface MarketRates {
+  preference: { fxSource: FxPreferredSource; fxEntity: string | null; fxSide: FxSide };
+  today: string;
+  lastFetchedAt: string | null;
+  effective: { USD_DOP: string | null; EUR_DOP: string | null; EUR_USD: string | null };
+  quotes: MarketQuote[];
+}
+
+export interface InboxItem {
+  id: string;
+  source: 'csv' | 'xlsx' | 'email';
+  date: string;
+  description: string;
+  amount: string;
+  currency: Currency;
+  direction: 'debit' | 'credit';
+  accountId: string | null;
+  kind: InboxKind;
+  categoryId: string | null;
+  incomeSourceId: string | null;
+  transferAccountId: string | null;
+  scope: Scope;
+  ownerUserId: string | null;
+  ruleId: string | null;
+  duplicateOfExpenseId: string | null;
+  status: 'pending' | 'imported' | 'ignored';
+}
+
+export interface CategorizationRule {
+  id: string;
+  pattern: string;
+  kind: InboxKind;
+  categoryId: string | null;
+  incomeSourceId: string | null;
+  transferAccountId: string | null;
+  scope: Scope;
+  ownerUserId: string | null;
+}
+
+export interface ParsedImport {
+  fileName: string;
+  source: 'csv' | 'xlsx';
+  headers: string[];
+  rows: Record<string, string>[];
+  suggested: ImportMapping;
+  profileName: string | null;
+}
+
+export interface Transfer {
+  id: string;
+  fromAccountId: string;
+  toAccountId: string;
+  date: string;
+  amount: string;
+  currency: Currency;
+  toAmount: string | null;
+  description: string | null;
 }
 
 export interface Split {

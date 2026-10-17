@@ -1,5 +1,6 @@
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import Fastify, { type FastifyServerOptions } from 'fastify';
 import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { Config } from './config';
@@ -14,9 +15,11 @@ import { expenseRoutes } from './modules/expenses/routes';
 import { fxRateRoutes } from './modules/fx-rates/routes';
 import { goalRoutes } from './modules/goals/routes';
 import { householdRoutes } from './modules/household/routes';
+import { importRoutes } from './modules/import/routes';
 import { incomeRoutes } from './modules/income/routes';
 import { recurringExpenseRoutes } from './modules/recurring-expenses/routes';
 import { reportRoutes } from './modules/reports/routes';
+import { transferRoutes } from './modules/transfers/routes';
 import authPlugin from './plugins/auth';
 import errorsPlugin from './plugins/errors';
 
@@ -44,6 +47,7 @@ export const buildApp = async ({ config, db, logger = true }: BuildAppOptions) =
   await app.register(errorsPlugin);
   await app.register(cors, { origin: config.WEB_ORIGIN, credentials: true });
   await app.register(cookie, { secret: config.SESSION_SECRET });
+  await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
   await app.register(authPlugin);
 
   app.get('/api/health', async () => ({ status: 'ok' }));
@@ -63,6 +67,8 @@ export const buildApp = async ({ config, db, logger = true }: BuildAppOptions) =
       await api.register(goalRoutes);
       await api.register(debtRoutes);
       await api.register(reportRoutes);
+      await api.register(importRoutes);
+      await api.register(transferRoutes);
     },
     { prefix: '/api' },
   );

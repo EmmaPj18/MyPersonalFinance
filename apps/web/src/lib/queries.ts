@@ -17,6 +17,10 @@ import type {
   Invitation,
   LeavePreview,
   Me,
+  CategorizationRule,
+  InboxItem,
+  Transfer,
+  MarketRates,
   MemberBalances,
   MonthlyReport,
   RecurringExpense,
@@ -50,6 +54,8 @@ export const useCategories = () => useQuery({ queryKey: ['categories'], queryFn:
 export const useDeductionTypes = () =>
   useQuery({ queryKey: ['deduction-types'], queryFn: () => api.get<DeductionType[]>('/deduction-types') });
 export const useFxRates = () => useQuery({ queryKey: ['fx-rates'], queryFn: () => api.get<FxRate[]>('/fx-rates') });
+export const useMarketRates = () =>
+  useQuery({ queryKey: ['fx-rates', 'market'], queryFn: () => api.get<MarketRates>('/fx-rates/market') });
 
 export const useIncomeSources = () =>
   useQuery({ queryKey: ['income-sources'], queryFn: () => api.get<IncomeSource[]>('/income-sources') });
@@ -74,6 +80,11 @@ export const useUpcomingExpenses = (days = 30) =>
     queryKey: ['recurring-expenses', 'upcoming', days],
     queryFn: () => api.get<UpcomingExpense[]>('/recurring-expenses/upcoming', { days }),
   });
+
+export const useInbox = () => useQuery({ queryKey: ['inbox'], queryFn: () => api.get<InboxItem[]>('/inbox') });
+export const useRules = () =>
+  useQuery({ queryKey: ['rules'], queryFn: () => api.get<CategorizationRule[]>('/categorization-rules') });
+export const useTransfers = () => useQuery({ queryKey: ['transfers'], queryFn: () => api.get<Transfer[]>('/transfers') });
 
 export const useBudget = (year: number) =>
   useQuery({ queryKey: ['budget', year], queryFn: () => api.get<AnnualBudget>(`/budgets/${year}`) });
