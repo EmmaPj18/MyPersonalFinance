@@ -4,7 +4,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { accounts, goalContributions, savingsGoals } from '../../db/schema';
-import { assertCanEdit, assertInHousehold, assertMembers, visibilityFilter } from '../../lib/access';
+import { assertCanEdit, assertInHousehold, assertMembers, assertOwners, visibilityFilter } from '../../lib/access';
 import { notFound } from '../../lib/errors';
 import { currentUser, type AuthUser } from '../../plugins/auth';
 
@@ -55,7 +55,7 @@ export const goalRoutes: FastifyPluginAsyncZod = async (app) => {
   });
 
   const validate = async (user: AuthUser, input: { ownerUserId?: string | null; accountId?: string | null }) => {
-    await assertMembers(db, user.householdId, [input.ownerUserId]);
+    await assertOwners(db, user.householdId, [input.ownerUserId]);
     assertCanEdit(user, input.ownerUserId ?? null);
     await assertInHousehold(db, accounts, input.accountId, user.householdId, 'cuenta');
   };

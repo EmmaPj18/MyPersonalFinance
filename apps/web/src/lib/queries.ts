@@ -4,7 +4,7 @@ import { api, ApiError } from './api';
 import type {
   Account,
   AuditEntry,
-  BudgetView,
+  AnnualBudget,
   Category,
   Debt,
   DeductionType,
@@ -17,9 +17,15 @@ import type {
   Invitation,
   LeavePreview,
   Me,
+  CategorizationRule,
+  InboxItem,
+  Transfer,
+  MarketRates,
   MemberBalances,
   MonthlyReport,
   RecurringExpense,
+  UpcomingExpense,
+  UpcomingIncome,
   YearlyReport,
 } from './types';
 
@@ -48,9 +54,13 @@ export const useCategories = () => useQuery({ queryKey: ['categories'], queryFn:
 export const useDeductionTypes = () =>
   useQuery({ queryKey: ['deduction-types'], queryFn: () => api.get<DeductionType[]>('/deduction-types') });
 export const useFxRates = () => useQuery({ queryKey: ['fx-rates'], queryFn: () => api.get<FxRate[]>('/fx-rates') });
+export const useMarketRates = () =>
+  useQuery({ queryKey: ['fx-rates', 'market'], queryFn: () => api.get<MarketRates>('/fx-rates/market') });
 
 export const useIncomeSources = () =>
   useQuery({ queryKey: ['income-sources'], queryFn: () => api.get<IncomeSource[]>('/income-sources') });
+export const useUpcomingIncome = (days = 45) =>
+  useQuery({ queryKey: ['income-sources', 'upcoming', days], queryFn: () => api.get<UpcomingIncome[]>('/income-sources/upcoming', { days }) });
 export const useIncomeEntries = (filters: Record<string, string | undefined>) =>
   useQuery({ queryKey: ['income-entries', filters], queryFn: () => api.get<IncomeEntry[]>('/income-entries', filters) });
 
@@ -65,8 +75,19 @@ export const useExpenseHistory = (id: string | null) =>
 export const useRecurringExpenses = () =>
   useQuery({ queryKey: ['recurring-expenses'], queryFn: () => api.get<RecurringExpense[]>('/recurring-expenses') });
 
-export const useBudget = (month: string) =>
-  useQuery({ queryKey: ['budget', month], queryFn: () => api.get<BudgetView>(`/budgets/${month}`) });
+export const useUpcomingExpenses = (days = 30) =>
+  useQuery({
+    queryKey: ['recurring-expenses', 'upcoming', days],
+    queryFn: () => api.get<UpcomingExpense[]>('/recurring-expenses/upcoming', { days }),
+  });
+
+export const useInbox = () => useQuery({ queryKey: ['inbox'], queryFn: () => api.get<InboxItem[]>('/inbox') });
+export const useRules = () =>
+  useQuery({ queryKey: ['rules'], queryFn: () => api.get<CategorizationRule[]>('/categorization-rules') });
+export const useTransfers = () => useQuery({ queryKey: ['transfers'], queryFn: () => api.get<Transfer[]>('/transfers') });
+
+export const useBudget = (year: number) =>
+  useQuery({ queryKey: ['budget', year], queryFn: () => api.get<AnnualBudget>(`/budgets/${year}`) });
 
 export const useGoals = () => useQuery({ queryKey: ['goals'], queryFn: () => api.get<Goal[]>('/goals') });
 export const useDebts = () => useQuery({ queryKey: ['debts'], queryFn: () => api.get<Debt[]>('/debts') });

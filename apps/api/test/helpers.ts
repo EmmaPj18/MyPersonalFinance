@@ -101,3 +101,9 @@ export const categoryId = async (client: Client, name: string) => {
   const cats = await client.ok<{ id: string; name: string }[]>('GET', '/categories');
   return cats.find((c) => c.name === name)!.id;
 };
+
+/** Runs the scheduler's recurring job for a household as if today were `today`. */
+export const runJobs = async (ctx: TestContext, householdId: string, today: string) => {
+  const { runRecurring } = await import('../src/jobs/recurring');
+  return runRecurring(ctx.app.db, { householdId, today });
+};

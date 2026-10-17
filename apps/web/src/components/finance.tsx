@@ -90,11 +90,13 @@ export const OwnerSelect = ({
       }
     >
       <option value="shared">{sharedLabel}</option>
-      {members.map((m) => (
-        <option key={m.id} value={m.id}>
-          {m.name} (personal)
-        </option>
-      ))}
+      {members
+        .filter((m) => m.accountStatus === 'active' || m.id === value.ownerUserId)
+        .map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.name} (personal)
+          </option>
+        ))}
     </Select>
   );
 };

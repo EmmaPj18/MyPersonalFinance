@@ -69,7 +69,8 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
 
   app.post('/auth/login', { schema: { body: loginSchema } }, async (request, reply) => {
     const user = await findUserByEmail(db, request.body.email);
-    if (!user || !(await verify(user.passwordHash, request.body.password))) {
+    // Members without an account (managed) have no password and can't log in.
+    if (!user?.passwordHash || !(await verify(user.passwordHash, request.body.password))) {
       throw unauthorized('Email o contraseña incorrectos');
     }
     await app.startSession(reply, user.id);
@@ -97,7 +98,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const user = currentUser(request);
       const [row] = await db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, user.id));
-      if (!row || !(await verify(row.passwordHash, request.body.currentPassword))) {
+      if (!row?.passwordHash || !(await verify(row.passwordHash, request.body.currentPassword))) {
         throw badRequest('La contraseña actual no es correcta');
       }
       await db

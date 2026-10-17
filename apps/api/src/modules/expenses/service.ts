@@ -2,7 +2,7 @@ import { splitByPct, type ReassignInput, type SplitInput } from '@mypersonalfina
 import { eq } from 'drizzle-orm';
 import type { DbOrTx, Tx } from '../../db/client';
 import { expenses, expenseSplits } from '../../db/schema';
-import { assertCanEdit, assertMembers, resolveSplits } from '../../lib/access';
+import { assertCanEdit, assertMembers, assertOwners, resolveSplits } from '../../lib/access';
 import { writeAudit } from '../../lib/audit';
 import type { AuthUser } from '../../plugins/auth';
 
@@ -35,7 +35,7 @@ export const currentSplits = async (db: DbOrTx, expenseId: string): Promise<Spli
 export const reassignExpense = async (tx: Tx, user: AuthUser, expense: Expense, input: ReassignInput) => {
   assertCanEdit(user, expense.ownerUserId);
   const ownerUserId = input.scope === 'personal' ? input.ownerUserId! : null;
-  await assertMembers(tx, user.householdId, [ownerUserId]);
+  await assertOwners(tx, user.householdId, [ownerUserId]);
 
   const beforeSplits = expense.scope === 'shared' ? await currentSplits(tx, expense.id) : [];
   const splits = input.scope === 'shared' ? await resolveSplits(tx, user.householdId, input.splits) : [];

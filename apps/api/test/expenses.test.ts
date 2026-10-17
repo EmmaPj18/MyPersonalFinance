@@ -103,60 +103,6 @@ describe('expenses', () => {
     expect(report.expenses.total).toBe('5000.00');
   });
 
-  it('generates fixed expenses idempotently and marks them as paid with the real amount', async () => {
-    const { owner } = await createCouple(ctx);
-    const housing = await categoryId(owner, 'Vivienda');
-    await owner.ok('POST', '/recurring-expenses', {
-      name: 'Alquiler',
-      categoryId: housing,
-      amount: '35000',
-      currency: 'DOP',
-      scope: 'shared',
-      dueDay: 5,
-      startDate: '2026-01-01',
-    });
-    await owner.ok('POST', '/recurring-expenses', {
-      name: 'Luz',
-      amount: '3000',
-      currency: 'DOP',
-      scope: 'shared',
-      dueDay: 20,
-      isVariableAmount: true,
-      startDate: '2026-01-01',
-    });
-    expect(await owner.ok('POST', '/recurring-expenses/generate?month=2026-11')).toEqual({ created: 2 });
-    expect(await owner.ok('POST', '/recurring-expenses/generate?month=2026-11')).toEqual({ created: 0 });
-
-    const pending = await owner.ok<any[]>('GET', '/expenses?month=2026-11&status=pending&nature=fixed');
-    expect(pending).toHaveLength(2);
-    const luz = pending.find((e) => e.description === 'Luz');
-    const paid = await owner.ok('POST', `/expenses/${luz.id}/pay`, { amount: '3480.50' });
-    expect(paid.status).toBe('paid');
-    expect(paid.amount).toBe('3480.50');
-    const after = await owner.ok<any[]>('GET', '/expenses?month=2026-11');
-    expect(after.find((e) => e.id === luz.id).splits.map((s: any) => s.shareAmount).sort()).toEqual(['1740.25', '1740.25']);
-  });
-
-  it('reassigns a fixed expense and its future occurrences', async () => {
-    const { owner, wife } = await createCouple(ctx);
-    const template = await owner.ok('POST', '/recurring-expenses', {
-      name: 'Netflix',
-      amount: '600',
-      currency: 'DOP',
-      scope: 'shared',
-      dueDay: 28,
-      startDate: '2026-01-01',
-    });
-    await owner.ok('POST', '/recurring-expenses/generate?month=2099-01');
-    const result = await owner.ok('POST', `/recurring-expenses/${template.id}/reassign?apply=future`, {
-      scope: 'personal',
-      ownerUserId: wife.me.id,
-    });
-    expect(result.reassignedOccurrences).toBe(1);
-    const [occurrence] = await wife.ok<any[]>('GET', '/expenses?month=2099-01');
-    expect(occurrence.ownerUserId).toBe(wife.me.id);
-  });
-
   it('viewers cannot write', async () => {
     const owner = await registerUser(ctx, 'Owner');
     const email = `viewer-${Date.now()}@test.com`;

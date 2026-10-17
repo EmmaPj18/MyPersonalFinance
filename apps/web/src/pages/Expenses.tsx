@@ -1,7 +1,6 @@
-import type { ExpenseNature, Scope } from '@mypersonalfinance/shared';
-import { useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Pencil, Plus, Trash2, UserRoundCog } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { occurrencesPerYear, type Currency, type ExpenseNature, type Scope } from '@mypersonalfinance/shared';
+import { CalendarClock, CheckCircle2, FileUp, Pencil, Plus, Repeat, Trash2, UserRoundCog, Zap } from 'lucide-react';
+import { useState } from 'react';
 import { Money, OwnerBadge } from '../components/finance';
 import { MonthPicker } from '../components/layout/AppLayout';
 import {
@@ -22,19 +21,22 @@ import {
 } from '../components/ui';
 import { usePrefs } from '../context/prefs';
 import { api } from '../lib/api';
-import { formatDate, formatMoney, formatMonth, RECURRENCE_LABELS } from '../lib/format';
-import { useApiMutation, useCategories, useExpenses, useRecurringExpenses } from '../lib/queries';
+import { formatDate, formatMoney, formatMonth, formatShortDate, RECURRENCE_LABELS } from '../lib/format';
+import { useAccounts, useApiMutation, useCategories, useExpenses, useInbox, useRecurringExpenses, useUpcomingExpenses } from '../lib/queries';
 import type { Expense, RecurringExpense } from '../lib/types';
 import { ExpenseForm, PayForm, ReassignForm, RecurringForm } from './expenses/forms';
+import { ImportWizard } from './expenses/ImportWizard';
+import { ReviewInbox } from './expenses/ReviewInbox';
 
-type Tab = 'variable' | 'fixed' | 'templates';
+type Tab = 'movements' | 'fixed' | 'review';
+type NatureFilter = 'all' | ExpenseNature;
 type ScopeFilter = 'all' | Scope;
 
 type ModalState =
   | { kind: 'expense'; expense?: Expense; nature?: ExpenseNature }
   | { kind: 'pay'; expense: Expense }
   | { kind: 'reassign'; expense: Expense }
-  | { kind: 'recurring'; template?: RecurringExpense }
+  | { kind: 'recurring'; template?: RecurringExpense; fromExpense?: Expense }
   | { kind: 'reassign-recurring'; template: RecurringExpense }
   | null;
 
@@ -62,8 +64,11 @@ const ExpenseTable = ({ expenses, onAction }: { expenses: Expense[]; onAction: (
             <Td className="whitespace-nowrap">{formatDate(e.date)}</Td>
             <Td>
               <span className="font-medium">{e.description}</span>{' '}
-              {e.status === 'pending' && <Badge tone="warning">Pendiente</Badge>}
-              {e.nature === 'fixed' && <Badge>Fijo</Badge>}
+              <span className="inline-flex flex-wrap gap-1 align-middle">
+                {e.nature === 'fixed' && <Badge>Fijo</Badge>}
+                {e.status === 'pending' && <Badge tone="warning">Pendiente</Badge>}
+                {e.isEstimated && <Badge tone="warning">Estimado</Badge>}
+              </span>
             </Td>
             <Td>
               <span className="inline-flex items-center gap-1.5">
@@ -85,8 +90,19 @@ const ExpenseTable = ({ expenses, onAction }: { expenses: Expense[]; onAction: (
             <Td className="text-right whitespace-nowrap">
               {editable(e) && (
                 <>
-                  {e.status === 'pending' && (
-                    <IconButton label="Marcar como pagado" onClick={() => onAction({ kind: 'pay', expense: e })} icon={<CheckCircle2 className="size-4" />} />
+                  {(e.status === 'pending' || e.isEstimated) && (
+                    <IconButton
+                      label={e.status === 'pending' ? 'Marcar como pagado' : 'Confirmar monto real'}
+                      onClick={() => onAction({ kind: 'pay', expense: e })}
+                      icon={<CheckCircle2 className="size-4" />}
+                    />
+                  )}
+                  {!e.recurringExpenseId && (
+                    <IconButton
+                      label="Convertir en gasto fijo"
+                      onClick={() => onAction({ kind: 'recurring', fromExpense: e })}
+                      icon={<Repeat className="size-4" />}
+                    />
                   )}
                   <IconButton label="Cambiar dueño" onClick={() => onAction({ kind: 'reassign', expense: e })} icon={<UserRoundCog className="size-4" />} />
                   <IconButton label="Editar" onClick={() => onAction({ kind: 'expense', expense: e })} icon={<Pencil className="size-4" />} />
@@ -101,32 +117,145 @@ const ExpenseTable = ({ expenses, onAction }: { expenses: Expense[]; onAction: (
   );
 };
 
+/** Monthly-equivalent total per currency of the active fixed expenses. */
+const monthlyCommitted = (templates: RecurringExpense[]) => {
+  const totals = new Map<Currency, number>();
+  for (const t of templates) {
+    if (!t.active) continue;
+    totals.set(t.currency, (totals.get(t.currency) ?? 0) + (Number(t.amount) * occurrencesPerYear[t.frequency]) / 12);
+  }
+  return [...totals.entries()];
+};
+
+const FixedExpenses = ({ onAction }: { onAction: (m: ModalState) => void }) => {
+  const { canWrite, isOwner, me, view, nameOf } = usePrefs();
+  const templates = useRecurringExpenses();
+  const upcoming = useUpcomingExpenses(30);
+  const accounts = useAccounts();
+  const remove = useApiMutation((id: string) => api.del(`/recurring-expenses/${id}`), ['recurring-expenses', 'expenses']);
+  const visible = (templates.data ?? []).filter((t) => view === 'household' || t.scope === 'shared' || t.ownerUserId === me.id);
+  const accountName = (id: string | null) => accounts.data?.find((a) => a.id === id)?.name;
+
+  if (templates.isLoading) return <Spinner />;
+  if (visible.length === 0) {
+    return (
+      <Card>
+        <EmptyState
+          title="Sin gastos fijos"
+          description="Alquiler, servicios, colegio, préstamos… Créalos una vez y se registran solos en cada fecha."
+          action={canWrite && <Button onClick={() => onAction({ kind: 'recurring' })}>Crear gasto fijo</Button>}
+        />
+      </Card>
+    );
+  }
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap gap-3">
+          {monthlyCommitted(visible).map(([currency, total]) => (
+            <Card key={currency} className="flex-1 p-4">
+              <p className="text-sm text-muted">Comprometido al mes ({currency})</p>
+              <p className="mt-1 text-xl font-semibold">
+                <Money value={total.toFixed(2)} currency={currency} />
+              </p>
+            </Card>
+          ))}
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          {visible.map((t) => (
+            <Card key={t.id} className={`p-4 ${t.active ? '' : 'opacity-60'}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold">{t.name}</p>
+                  <p className="text-xs text-muted">
+                    {RECURRENCE_LABELS[t.frequency]}
+                    {t.frequency !== 'weekly' && t.frequency !== 'biweekly' && ` · día ${t.dueDay}${t.secondDueDay ? ` y ${t.secondDueDay}` : ''}`}
+                    {t.categoryName && ` · ${t.categoryName}`}
+                  </p>
+                </div>
+                <Money value={t.amount} currency={t.currency} className="font-semibold" />
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
+                <OwnerBadge scope={t.scope} ownerUserId={t.ownerUserId} />
+                {t.autoPay ? (
+                  <Badge tone="primary">
+                    <Zap className="size-3" aria-hidden /> Automático
+                  </Badge>
+                ) : (
+                  <Badge>Confirmación manual</Badge>
+                )}
+                {t.isVariableAmount && <Badge tone="warning">Monto variable</Badge>}
+                {!t.active && <Badge>Pausado</Badge>}
+              </div>
+              <p className="mt-2 text-xs text-muted">
+                {t.nextDate ? `Próximo: ${formatDate(t.nextDate)}` : 'Sin próximas fechas'}
+                {t.paidByUserId && ` · lo paga ${nameOf(t.paidByUserId)}`}
+                {accountName(t.accountId) && ` · ${accountName(t.accountId)}`}
+              </p>
+              {canWrite && (isOwner || t.scope === 'shared' || t.ownerUserId === me.id) && (
+                <div className="mt-2 flex justify-end">
+                  <IconButton label="Cambiar dueño" onClick={() => onAction({ kind: 'reassign-recurring', template: t })} icon={<UserRoundCog className="size-4" />} />
+                  <IconButton label="Editar" onClick={() => onAction({ kind: 'recurring', template: t })} icon={<Pencil className="size-4" />} />
+                  <IconButton
+                    label="Eliminar"
+                    onClick={() => confirm(`¿Eliminar "${t.name}"? Los pagos ya registrados se conservan.`) && remove.mutate(t.id)}
+                    icon={<Trash2 className="size-4" />}
+                  />
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
+      </div>
+      <Card className="self-start">
+        <CardHeader title="Próximos 30 días" />
+        {!upcoming.data?.length ? (
+          <EmptyState title="Nada programado" />
+        ) : (
+          <ul className="divide-y divide-border">
+            {upcoming.data
+              .filter((u) => view === 'household' || u.scope === 'shared' || u.ownerUserId === me.id)
+              .map((u) => (
+                <li key={`${u.recurringExpenseId}-${u.date}`} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                  <CalendarClock className="size-4 shrink-0 text-muted" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{u.name}</p>
+                    <p className="text-xs text-muted">
+                      {formatShortDate(u.date)}
+                      {u.isVariableAmount && ' · estimado'}
+                    </p>
+                  </div>
+                  <Money value={u.amount} currency={u.currency} />
+                </li>
+              ))}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
+};
+
 export const ExpensesPage = () => {
-  const { month, view, me, members, canWrite, isOwner } = usePrefs();
-  const [tab, setTab] = useState<Tab>('variable');
+  const { month, view, me, members, canWrite } = usePrefs();
+  const [tab, setTab] = useState<Tab>('movements');
+  const [nature, setNature] = useState<NatureFilter>('all');
   const [scope, setScope] = useState<ScopeFilter>('all');
   const [person, setPerson] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
+  const [applyTo, setApplyTo] = useState<'future' | 'all'>('future');
   const categories = useCategories();
-  const templates = useRecurringExpenses();
-  const qc = useQueryClient();
+  const inbox = useInbox();
+  const [importing, setImporting] = useState(false);
 
   const expenses = useExpenses({
     month,
-    nature: tab === 'templates' ? undefined : tab,
+    nature: nature === 'all' ? undefined : nature,
     scope: scope === 'all' ? undefined : scope,
     ownerUserId: person || undefined,
     categoryId: categoryId || undefined,
   });
-
-  // Fixed expenses of the month are generated automatically (idempotent) when the tab opens.
-  useEffect(() => {
-    if (tab !== 'fixed' || !canWrite) return;
-    void api.post<{ created: number }>('/recurring-expenses/generate', {}, { month }).then((r) => {
-      if (r.created > 0) void qc.invalidateQueries({ queryKey: ['expenses'] });
-    });
-  }, [tab, month, canWrite, qc]);
 
   const close = () => setModal(null);
   const saveExpense = useApiMutation(
@@ -143,17 +272,15 @@ export const ExpensesPage = () => {
       id ? api.put(`/recurring-expenses/${id}`, payload) : api.post('/recurring-expenses', payload),
     ['recurring-expenses', 'expenses'],
   );
-  const removeTemplate = useApiMutation((id: string) => api.del(`/recurring-expenses/${id}`), ['recurring-expenses', 'expenses']);
   const reassignTemplate = useApiMutation(
     ({ id, payload, apply }: { id: string; payload: unknown; apply: string }) =>
       api.post(`/recurring-expenses/${id}/reassign`, payload, { apply }),
     ['recurring-expenses', 'expenses'],
   );
-  const [applyTo, setApplyTo] = useState<'future' | 'all'>('future');
 
   // "Mis finanzas": my personal expenses + the shared ones.
   const rows = (expenses.data ?? []).filter((e) => view === 'household' || e.scope === 'shared' || e.ownerUserId === me.id);
-  const pending = rows.filter((e) => e.status === 'pending');
+  const total = rows.reduce((acc, e) => acc.set(e.currency, (acc.get(e.currency) ?? 0) + Number(e.amount)), new Map<Currency, number>());
 
   return (
     <>
@@ -162,13 +289,18 @@ export const ExpensesPage = () => {
         subtitle="Gastos corrientes y fijos, del hogar o personales."
         actions={
           <>
-            <MonthPicker />
-            {canWrite && tab !== 'templates' && (
-              <Button icon={<Plus className="size-4" />} onClick={() => setModal({ kind: 'expense', nature: tab === 'fixed' ? 'fixed' : 'variable' })}>
+            {tab === 'movements' && <MonthPicker />}
+            {canWrite && tab === 'movements' && (
+              <Button icon={<Plus className="size-4" />} onClick={() => setModal({ kind: 'expense' })}>
                 Nuevo gasto
               </Button>
             )}
-            {canWrite && tab === 'templates' && (
+            {canWrite && (
+              <Button variant="secondary" icon={<FileUp className="size-4" />} onClick={() => setImporting(true)}>
+                Importar archivo
+              </Button>
+            )}
+            {canWrite && tab === 'fixed' && (
               <Button icon={<Plus className="size-4" />} onClick={() => setModal({ kind: 'recurring' })}>
                 Nuevo gasto fijo
               </Button>
@@ -179,17 +311,28 @@ export const ExpensesPage = () => {
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Segmented<Tab>
-          ariaLabel="Tipo de gastos"
+          ariaLabel="Sección de gastos"
           value={tab}
           onChange={setTab}
           options={[
-            { value: 'variable', label: 'Corrientes' },
-            { value: 'fixed', label: 'Fijos del mes' },
-            { value: 'templates', label: 'Gastos fijos (plantillas)' },
+            { value: 'movements', label: 'Movimientos' },
+            { value: 'fixed', label: 'Gastos fijos' },
+            { value: 'review', label: `Por revisar${inbox.data?.length ? ` (${inbox.data.length})` : ''}` },
           ]}
         />
-        {tab !== 'templates' && (
+        {tab === 'movements' && (
           <div className="flex flex-wrap items-center gap-2">
+            <Segmented<NatureFilter>
+              ariaLabel="Tipo de gasto"
+              size="sm"
+              value={nature}
+              onChange={setNature}
+              options={[
+                { value: 'all', label: 'Todos' },
+                { value: 'fixed', label: 'Fijos' },
+                { value: 'variable', label: 'Corrientes' },
+              ]}
+            />
             <Segmented<ScopeFilter>
               ariaLabel="Común o personal"
               size="sm"
@@ -223,73 +366,31 @@ export const ExpensesPage = () => {
         )}
       </div>
 
-      {tab !== 'templates' && (
+      {tab === 'movements' && (
         <Card>
           <CardHeader
-            title={`${tab === 'fixed' ? 'Gastos fijos' : 'Gastos corrientes'} de ${formatMonth(month)}`}
-            subtitle={
-              tab === 'fixed' && rows.length > 0
-                ? `${rows.length - pending.length} de ${rows.length} pagados`
-                : undefined
-            }
+            title={`Gastos de ${formatMonth(month)}`}
+            subtitle={[...total.entries()].map(([c, v]) => formatMoney(v, c)).join(' · ') || undefined}
           />
           {expenses.isLoading ? (
             <Spinner />
           ) : rows.length === 0 ? (
-            <EmptyState
-              title="Sin gastos"
-              description={
-                tab === 'fixed'
-                  ? 'Crea tus gastos fijos (alquiler, servicios, colegio…) en la pestaña de plantillas y aparecerán aquí cada mes.'
-                  : 'Registra tus gastos del día a día.'
-              }
-            />
+            <EmptyState title="Sin gastos" description="Registra tus gastos del día a día; los fijos aparecen solos en su fecha." />
           ) : (
             <ExpenseTable expenses={rows} onAction={setModal} />
           )}
         </Card>
       )}
 
-      {tab === 'templates' && (
-        <Card>
-          <CardHeader title="Gastos fijos" subtitle="Se generan automáticamente como pendientes cada mes." />
-          {templates.isLoading ? (
-            <Spinner />
-          ) : !templates.data?.length ? (
-            <EmptyState title="Sin gastos fijos" description="Ej. alquiler, internet, colegio, seguros, suscripciones." />
-          ) : (
-            <ul className="divide-y divide-border">
-              {templates.data.map((t) => (
-                <li key={t.id} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium">
-                      {t.name} {!t.active && <Badge>Inactivo</Badge>} {t.isVariableAmount && <Badge tone="warning">Monto variable</Badge>}
-                    </p>
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-                      <OwnerBadge scope={t.scope} ownerUserId={t.ownerUserId} />
-                      <span>
-                        {RECURRENCE_LABELS[t.frequency]} · día {t.dueDay} · {t.categoryName ?? 'Sin categoría'}
-                      </span>
-                    </div>
-                  </div>
-                  <Money value={t.amount} currency={t.currency} className="font-medium" />
-                  {canWrite && (isOwner || t.scope === 'shared' || t.ownerUserId === me.id) && (
-                    <div className="flex items-center gap-1">
-                      <IconButton label="Cambiar dueño" onClick={() => setModal({ kind: 'reassign-recurring', template: t })} icon={<UserRoundCog className="size-4" />} />
-                      <IconButton label="Editar" onClick={() => setModal({ kind: 'recurring', template: t })} icon={<Pencil className="size-4" />} />
-                      <IconButton
-                        label="Eliminar"
-                        onClick={() => confirm(`¿Eliminar "${t.name}"? Se borran sus pendientes; los pagados se conservan.`) && removeTemplate.mutate(t.id)}
-                        icon={<Trash2 className="size-4" />}
-                      />
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      )}
+      {tab === 'fixed' && <FixedExpenses onAction={setModal} />}
+      {tab === 'review' && <ReviewInbox />}
+      <ImportWizard
+        open={importing}
+        onClose={() => {
+          setImporting(false);
+          setTab('review');
+        }}
+      />
 
       <Modal open={modal?.kind === 'expense'} onClose={close} title={modal?.kind === 'expense' && modal.expense ? 'Editar gasto' : 'Nuevo gasto'} wide>
         {modal?.kind === 'expense' && (
@@ -301,10 +402,18 @@ export const ExpensesPage = () => {
               await saveExpense.mutateAsync({ id: modal.expense?.id, payload });
               close();
             }}
+            onSubmitRecurring={async (payload) => {
+              await saveTemplate.mutateAsync({ payload });
+              close();
+            }}
           />
         )}
       </Modal>
-      <Modal open={modal?.kind === 'pay'} onClose={close} title="Registrar pago">
+      <Modal
+        open={modal?.kind === 'pay'}
+        onClose={close}
+        title={modal?.kind === 'pay' && modal.expense.status === 'paid' ? 'Confirmar monto real' : 'Registrar pago'}
+      >
         {modal?.kind === 'pay' && (
           <PayForm
             expense={modal.expense}
@@ -329,10 +438,16 @@ export const ExpensesPage = () => {
           />
         )}
       </Modal>
-      <Modal open={modal?.kind === 'recurring'} onClose={close} title={modal?.kind === 'recurring' && modal.template ? 'Editar gasto fijo' : 'Nuevo gasto fijo'} wide>
+      <Modal
+        open={modal?.kind === 'recurring'}
+        onClose={close}
+        title={modal?.kind === 'recurring' && modal.template ? 'Editar gasto fijo' : modal?.kind === 'recurring' && modal.fromExpense ? 'Convertir en gasto fijo' : 'Nuevo gasto fijo'}
+        wide
+      >
         {modal?.kind === 'recurring' && (
           <RecurringForm
             initial={modal.template}
+            fromExpense={modal.fromExpense}
             onCancel={close}
             onSubmit={async (payload) => {
               await saveTemplate.mutateAsync({ id: modal.template?.id, payload });
@@ -353,11 +468,11 @@ export const ExpensesPage = () => {
                   value={applyTo}
                   onChange={setApplyTo}
                   options={[
-                    { value: 'future', label: 'Este y los próximos pendientes' },
-                    { value: 'all', label: 'Todos (incluye pagados)' },
+                    { value: 'future', label: 'Solo de aquí en adelante' },
+                    { value: 'all', label: 'También los ya registrados' },
                   ]}
                 />
-                <p className="text-xs text-muted">Para cambiar solo un mes, usa "Cambiar dueño" sobre ese gasto en "Fijos del mes".</p>
+                <p className="text-xs text-muted">Para cambiar un solo mes, usa "Cambiar dueño" sobre ese gasto en Movimientos.</p>
               </div>
             }
             onCancel={close}

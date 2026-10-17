@@ -1,6 +1,8 @@
 import {
   acceptInvitationSchema,
+  claimInvitationSchema,
   createInvitationSchema,
+  createManagedMemberSchema,
   idParamsSchema,
   transferOwnershipSchema,
   updateHouseholdSchema,
@@ -14,7 +16,7 @@ import { badRequest, conflict, forbidden, notFound, unauthorized } from '../../l
 import { hashToken, newToken } from '../../lib/tokens';
 import { currentUser } from '../../plugins/auth';
 import { findUserByEmail, hashPassword } from '../auth/routes';
-import { leavePreview, moveUser, openMembership } from './membership';
+import { leavePreview, mergeManagedMember, moveUser, openMembership } from './membership';
 
 const INVITATION_TTL_DAYS = 7;
 
@@ -41,6 +43,7 @@ export const householdRoutes: FastifyPluginAsyncZod = async (app) => {
         role: users.role,
         defaultSplitPct: users.defaultSplitPct,
         defaultCurrency: users.defaultCurrency,
+        accountStatus: users.accountStatus,
       })
       .from(users)
       .where(eq(users.householdId, householdId))
@@ -62,9 +65,38 @@ export const householdRoutes: FastifyPluginAsyncZod = async (app) => {
 
   app.patch('/household', { preHandler: app.requireOwner, schema: { body: updateHouseholdSchema } }, async (request) => {
     const { householdId } = currentUser(request);
+    if (request.body.fxSource === 'infodolar' && !request.body.fxEntity) {
+      throw badRequest('Elige el banco o casa de cambio de Infodolar');
+    }
     const [household] = await db.update(households).set(request.body).where(eq(households.id, householdId)).returning();
     return household;
   });
+
+  /** Adds a member without an account (e.g. a partner who hasn't signed up yet). */
+  app.post(
+    '/household/members',
+    { preHandler: app.requireOwner, schema: { body: createManagedMemberSchema } },
+    async (request, reply) => {
+      const user = currentUser(request);
+      const { name, defaultSplitPct } = request.body;
+      const member = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(users)
+          .values({
+            name,
+            householdId: user.householdId,
+            role: 'member',
+            accountStatus: 'managed',
+            defaultCurrency: user.baseCurrency,
+            defaultSplitPct: defaultSplitPct == null ? null : String(defaultSplitPct),
+          })
+          .returning({ id: users.id, name: users.name, accountStatus: users.accountStatus });
+        await openMembership(tx, row!.id, user.householdId, 'member');
+        return row!;
+      });
+      return reply.status(201).send(member);
+    },
+  );
 
   app.patch(
     '/household/members/:id',
@@ -72,7 +104,11 @@ export const householdRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request) => {
       const user = currentUser(request);
       const member = await memberOf(user.householdId, request.params.id);
-      const { role, defaultSplitPct } = request.body;
+      const { role, defaultSplitPct, name } = request.body;
+      if (member.accountStatus === 'managed' && role && role !== 'member') {
+        throw badRequest('Un miembro sin cuenta no puede tener ese rol');
+      }
+      if (name && member.accountStatus !== 'managed') throw badRequest('Cada persona con cuenta edita su propio nombre');
       if (role && role !== 'owner' && member.role === 'owner') {
         const [owners] = await db
           .select({ n: sql<number>`count(*)::int` })
@@ -84,10 +120,11 @@ export const householdRoutes: FastifyPluginAsyncZod = async (app) => {
         .update(users)
         .set({
           ...(role ? { role } : {}),
+          ...(name ? { name } : {}),
           ...(defaultSplitPct !== undefined ? { defaultSplitPct: defaultSplitPct === null ? null : String(defaultSplitPct) } : {}),
         })
         .where(eq(users.id, member.id))
-        .returning({ id: users.id, role: users.role, defaultSplitPct: users.defaultSplitPct });
+        .returning({ id: users.id, name: users.name, role: users.role, defaultSplitPct: users.defaultSplitPct });
       return updated;
     },
   );
@@ -99,7 +136,18 @@ export const householdRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const user = currentUser(request);
       if (request.params.id === user.id) throw badRequest('Para salir del hogar usa "Salir del hogar"');
-      await memberOf(user.householdId, request.params.id);
+      const member = await memberOf(user.householdId, request.params.id);
+      if (member.accountStatus === 'managed') {
+        try {
+          await db.transaction(async (tx) => {
+            await tx.delete(householdMembershipHistory).where(eq(householdMembershipHistory.userId, member.id));
+            await tx.delete(users).where(eq(users.id, member.id));
+          });
+        } catch {
+          throw conflict('Este miembro participa en gastos o ingresos; cambia esos repartos antes de eliminarlo', 'MEMBER_IN_USE');
+        }
+        return reply.status(204).send();
+      }
       await db.transaction((tx) => moveUser(tx, request.params.id, null, user.id));
       return reply.status(204).send();
     },
@@ -153,6 +201,31 @@ export const householdRoutes: FastifyPluginAsyncZod = async (app) => {
       )
       .orderBy(householdInvitations.createdAt);
   });
+
+  /** Invites someone to take over the account of a member without one. */
+  app.post(
+    '/household/members/:id/invite',
+    { preHandler: app.requireOwner, schema: { params: idParamsSchema, body: claimInvitationSchema } },
+    async (request, reply) => {
+      const user = currentUser(request);
+      const member = await memberOf(user.householdId, request.params.id);
+      if (member.accountStatus !== 'managed') throw badRequest('Ese miembro ya tiene cuenta');
+      const token = newToken();
+      const [invitation] = await db
+        .insert(householdInvitations)
+        .values({
+          householdId: user.householdId,
+          email: request.body.email,
+          role: 'member',
+          tokenHash: hashToken(token),
+          invitedBy: user.id,
+          memberId: member.id,
+          expiresAt: new Date(Date.now() + INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000),
+        })
+        .returning({ id: householdInvitations.id, email: householdInvitations.email, expiresAt: householdInvitations.expiresAt });
+      return reply.status(201).send({ ...invitation!, url: `${app.config.WEB_ORIGIN}/invitations/${token}` });
+    },
+  );
 
   app.post(
     '/household/invitations',
@@ -214,7 +287,11 @@ export const householdRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get('/invitations/:token', { schema: { params: tokenParams } }, async (request) => {
     const { invitation, householdName, invitedByName } = await findValidInvitation(request.params.token);
     const existing = await findUserByEmail(db, invitation.email);
+    const [member] = invitation.memberId
+      ? await db.select({ name: users.name }).from(users).where(eq(users.id, invitation.memberId))
+      : [];
     return {
+      memberName: member?.name ?? null,
       email: invitation.email,
       role: invitation.role,
       householdName,
@@ -236,7 +313,12 @@ export const householdRoutes: FastifyPluginAsyncZod = async (app) => {
         if (!request.user) throw unauthorized('Inicia sesión con la cuenta invitada para aceptar');
         if (request.user.id !== existing.id) throw forbidden('Esta invitación es para otra cuenta');
         const result = await db.transaction(async (tx) => {
-          const moved = await moveUser(tx, existing.id, target, existing.id);
+          const moved =
+            existing.householdId === invitation.householdId
+              ? { householdId: existing.householdId, role: existing.role, moved: {} }
+              : await moveUser(tx, existing.id, target, existing.id);
+          // Taking over a member without an account: everything it had becomes this user's.
+          if (invitation.memberId) await mergeManagedMember(tx, invitation.memberId, existing.id);
           await tx
             .update(householdInvitations)
             .set({ acceptedAt: new Date() })
@@ -247,6 +329,26 @@ export const householdRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const { name, password, defaultCurrency } = request.body ?? {};
+      if (invitation.memberId) {
+        // New account taking over a member without one: the same user row becomes a login.
+        if (!password) throw badRequest('La contraseña es requerida para crear la cuenta');
+        const passwordHash = await hashPassword(password);
+        await db.transaction(async (tx) => {
+          await tx
+            .update(users)
+            .set({
+              email: invitation.email,
+              passwordHash,
+              accountStatus: 'active',
+              ...(name ? { name } : {}),
+              ...(defaultCurrency ? { defaultCurrency } : {}),
+            })
+            .where(eq(users.id, invitation.memberId!));
+          await tx.update(householdInvitations).set({ acceptedAt: new Date() }).where(eq(householdInvitations.id, invitation.id));
+        });
+        await app.startSession(reply, invitation.memberId);
+        return reply.status(201).send({ householdId: invitation.householdId, role: invitation.role });
+      }
       if (!name || !password) throw badRequest('Nombre y contraseña son requeridos para crear la cuenta');
       const passwordHash = await hashPassword(password);
       const userId = await db.transaction(async (tx) => {

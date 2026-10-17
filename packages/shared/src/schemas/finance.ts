@@ -1,14 +1,17 @@
 import { z } from 'zod';
 import {
   ACCOUNT_TYPES,
+  BUDGET_LINE_KINDS,
   DEBT_TYPES,
   DEDUCTION_CATEGORIES,
   EXPENSE_NATURES,
   EXPENSE_STATUSES,
+  INBOX_KINDS,
   INCOME_KINDS,
   INCOME_SOURCE_TYPES,
   PAY_FREQUENCIES,
   RECURRENCE_FREQUENCIES,
+  WEEKEND_RULES,
 } from '../constants';
 import {
   currencySchema,
@@ -22,6 +25,7 @@ import {
 
 const optionalId = uuidSchema.nullable().optional();
 const nameField = z.string().trim().min(1).max(120);
+const dayOfMonthSchema = z.coerce.number().int().min(1).max(31);
 
 // ---------------------------------------------------------------- catalogs
 
@@ -80,6 +84,14 @@ export const incomeSourceInputSchema = z.object({
   deductionTemplates: z
     .array(z.object({ deductionTypeId: uuidSchema, defaultAmount: moneySchema }))
     .optional(),
+  // Pay schedule
+  payDay: dayOfMonthSchema.nullable().optional(),
+  secondPayDay: dayOfMonthSchema.nullable().optional(),
+  scheduleStartDate: isoDateSchema.nullable().optional(),
+  weekendRule: z.enum(WEEKEND_RULES).default('none'),
+  expectedGross: moneySchema.nullable().optional(),
+  /** Register each payment automatically on its pay day (needs schedule, expected gross and account). */
+  autoRegister: z.boolean().default(false),
 });
 export type IncomeSourceInput = z.input<typeof incomeSourceInputSchema>;
 
@@ -172,28 +184,52 @@ export const recurringExpenseInputSchema = z.object({
   ownerUserId: optionalId,
   splits: splitsField,
   frequency: z.enum(RECURRENCE_FREQUENCIES).default('monthly'),
-  dueDay: z.coerce.number().int().min(1).max(31).default(1),
+  dueDay: dayOfMonthSchema.default(1),
+  secondDueDay: dayOfMonthSchema.nullable().optional(),
+  weekendRule: z.enum(WEEKEND_RULES).default('none'),
   startDate: isoDateSchema,
   endDate: isoDateSchema.nullable().optional(),
   isVariableAmount: z.boolean().default(false),
   active: z.boolean().default(true),
+  /** Register as paid on the due date (otherwise it's created pending). */
+  autoPay: z.boolean().default(true),
+  /** Who usually pays it; defaults to the current user. */
+  paidByUserId: optionalId,
+  /** Existing expense that becomes the first occurrence ("convert to fixed"). */
+  linkExpenseId: optionalId,
 });
 export type RecurringExpenseInput = z.input<typeof recurringExpenseInputSchema>;
 
 // ---------------------------------------------------------------- budgets
 
-export const budgetInputSchema = z.object({
-  currency: currencySchema,
-  items: z.array(
-    z.object({
-      categoryId: uuidSchema,
-      scope: scopeSchema,
-      ownerUserId: optionalId,
-      plannedAmount: moneySchema,
-    }),
-  ),
+export const budgetLineInputSchema = z.object({
+  kind: z.enum(BUDGET_LINE_KINDS),
+  /** expense lines */
+  categoryId: optionalId,
+  /** income lines */
+  incomeSourceId: optionalId,
+  /** saving lines */
+  goalId: optionalId,
+  scope: scopeSchema.default('shared'),
+  ownerUserId: optionalId,
+  nature: z.enum(EXPENSE_NATURES).nullable().optional(),
+  /** Planned amount for each month, January to December, in the plan's currency. */
+  amounts: z.array(moneySchema).length(12),
 });
-export type BudgetInput = z.input<typeof budgetInputSchema>;
+export type BudgetLineInput = z.input<typeof budgetLineInputSchema>;
+
+export const budgetPlanInputSchema = z.object({
+  currency: currencySchema,
+  lines: z.array(budgetLineInputSchema),
+});
+export type BudgetPlanInput = z.input<typeof budgetPlanInputSchema>;
+
+export const copyBudgetInputSchema = z.object({
+  /** Percentage applied to every amount, e.g. 5 = +5%. */
+  adjustPct: z.coerce.number().min(-100).max(1000).default(0),
+});
+
+export const yearParamsSchema = z.object({ year: z.coerce.number().int().min(2000).max(2100) });
 
 // ---------------------------------------------------------------- goals & debts
 
@@ -240,6 +276,8 @@ export const debtPaymentInputSchema = z.object({
 
 // ---------------------------------------------------------------- reports
 
+export const upcomingQuerySchema = z.object({ days: z.coerce.number().int().min(1).max(400).default(30) });
+
 export const reportQuerySchema = z.object({
   month: monthSchema,
   currency: currencySchema.optional(),
@@ -253,3 +291,88 @@ export const yearReportQuerySchema = z.object({
   view: z.enum(['household', 'me']).default('household'),
 });
 
+
+// ---------------------------------------------------------------- import & review
+
+const columnName = z.string().trim().min(1).max(120).optional();
+
+export const importMappingSchema = z.object({
+  /** Header name of each column in the file. */
+  columns: z.object({
+    date: columnName,
+    description: columnName,
+    /** Single signed amount column… */
+    amount: columnName,
+    /** …or separate debit / credit columns. */
+    debit: columnName,
+    credit: columnName,
+    currency: columnName,
+    category: columnName,
+    owner: columnName,
+    type: columnName,
+    account: columnName,
+  }),
+  /** With a single amount column: which sign is money going out. */
+  amountSign: z.enum(['negative-is-debit', 'positive-is-debit']).default('negative-is-debit'),
+  dateFormat: z.enum(['auto', 'dmy', 'mdy', 'ymd']).default('auto'),
+});
+export type ImportMapping = z.output<typeof importMappingSchema>;
+
+export const importBatchInputSchema = z.object({
+  fileName: z.string().max(255).optional(),
+  source: z.enum(['csv', 'xlsx']),
+  rows: z.array(z.record(z.string(), z.string())).max(5000),
+  mapping: importMappingSchema,
+  /** Account the statement belongs to (optional). */
+  accountId: uuidSchema.nullable().optional(),
+  currency: currencySchema,
+  /** Only normalize and return a preview. */
+  dryRun: z.boolean().default(false),
+  /** Save the mapping as a reusable profile with this name. */
+  saveProfileAs: z.string().trim().min(1).max(120).optional(),
+});
+
+export const inboxCommitItemSchema = z.object({
+  id: uuidSchema,
+  kind: z.enum(INBOX_KINDS),
+  categoryId: optionalId,
+  incomeSourceId: optionalId,
+  transferAccountId: optionalId,
+  accountId: optionalId,
+  scope: scopeSchema.default('shared'),
+  ownerUserId: optionalId,
+  description: z.string().trim().min(1).max(255).optional(),
+});
+export type InboxCommitItem = z.input<typeof inboxCommitItemSchema>;
+
+export const inboxCommitSchema = z.object({
+  items: z.array(inboxCommitItemSchema).min(1).max(1000),
+  /** Create rules so similar descriptions get the same classification next time. */
+  remember: z.boolean().default(false),
+});
+
+export const inboxIgnoreSchema = z.object({ ids: z.array(uuidSchema).min(1).max(1000) });
+
+export const categorizationRuleInputSchema = z.object({
+  pattern: z.string().trim().min(2).max(255),
+  kind: z.enum(INBOX_KINDS),
+  categoryId: optionalId,
+  incomeSourceId: optionalId,
+  transferAccountId: optionalId,
+  scope: scopeSchema.default('shared'),
+  ownerUserId: optionalId,
+});
+export type CategorizationRuleInput = z.input<typeof categorizationRuleInputSchema>;
+
+export const transferInputSchema = z
+  .object({
+    fromAccountId: uuidSchema,
+    toAccountId: uuidSchema,
+    date: isoDateSchema,
+    amount: moneySchema,
+    /** Amount credited when the destination account uses another currency. */
+    toAmount: moneySchema.nullable().optional(),
+    description: z.string().trim().max(255).nullable().optional(),
+  })
+  .refine((v) => v.fromAccountId !== v.toAccountId, { message: 'Las cuentas deben ser distintas', path: ['toAccountId'] });
+export type TransferInput = z.input<typeof transferInputSchema>;

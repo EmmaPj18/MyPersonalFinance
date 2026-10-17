@@ -8,6 +8,7 @@ import type {
   PayFrequency,
   RecurrenceFrequency,
   UserRole,
+  WeekendRule,
 } from '@mypersonalfinance/shared';
 
 const formatters = new Map<string, Intl.NumberFormat>();
@@ -79,9 +80,21 @@ export const PAY_FREQUENCY_LABELS: Record<PayFrequency, string> = {
 export const RECURRENCE_LABELS: Record<RecurrenceFrequency, string> = {
   weekly: 'Semanal',
   biweekly: 'Cada 2 semanas',
+  semimonthly: 'Quincenal (2 veces al mes)',
   monthly: 'Mensual',
+  quarterly: 'Trimestral',
   yearly: 'Anual',
 };
+
+export const WEEKEND_RULE_LABELS: Record<WeekendRule, string> = {
+  none: 'Mantener la fecha',
+  previous: 'Mover al viernes anterior',
+  next: 'Mover al lunes siguiente',
+};
+
+/** Short date without year, e.g. "15 nov". */
+export const formatShortDate = (iso: string) =>
+  new Date(`${iso.slice(0, 10)}T00:00:00`).toLocaleDateString('es-DO', { day: 'numeric', month: 'short' });
 
 export const DEDUCTION_CATEGORY_LABELS: Record<DeductionCategory, string> = {
   income_tax: 'Impuesto sobre la renta',
