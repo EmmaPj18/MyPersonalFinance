@@ -15,10 +15,12 @@
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "^11.3.0",
+    "@fastify/multipart": "^10.1.4",
     "@fastify/sensible": "^6.0.6",
     "@mypersonalfinance/shared": "workspace:*",
     "@node-rs/argon2": "^2.2.1",
     "cheerio": "^1.2.0",
+    "csv-parse": "^7.0.3",
     "decimal.js": "^10.6.0",
     "drizzle-orm": "^0.45.3",
     "exceljs": "^4.4.0",

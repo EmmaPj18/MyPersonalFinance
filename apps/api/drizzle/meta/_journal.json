@@ -43,6 +43,13 @@
       "when": 1792256666179,
       "tag": "0005_market_rates",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792257180098,
+      "tag": "0006_import_inbox",
+      "breakpoints": true
     }
   ]
 }

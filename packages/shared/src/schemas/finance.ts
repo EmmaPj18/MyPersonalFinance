@@ -6,6 +6,7 @@ import {
   DEDUCTION_CATEGORIES,
   EXPENSE_NATURES,
   EXPENSE_STATUSES,
+  INBOX_KINDS,
   INCOME_KINDS,
   INCOME_SOURCE_TYPES,
   PAY_FREQUENCIES,
@@ -290,3 +291,88 @@ export const yearReportQuerySchema = z.object({
   view: z.enum(['household', 'me']).default('household'),
 });
 
+
+// ---------------------------------------------------------------- import & review
+
+const columnName = z.string().trim().min(1).max(120).optional();
+
+export const importMappingSchema = z.object({
+  /** Header name of each column in the file. */
+  columns: z.object({
+    date: columnName,
+    description: columnName,
+    /** Single signed amount column… */
+    amount: columnName,
+    /** …or separate debit / credit columns. */
+    debit: columnName,
+    credit: columnName,
+    currency: columnName,
+    category: columnName,
+    owner: columnName,
+    type: columnName,
+    account: columnName,
+  }),
+  /** With a single amount column: which sign is money going out. */
+  amountSign: z.enum(['negative-is-debit', 'positive-is-debit']).default('negative-is-debit'),
+  dateFormat: z.enum(['auto', 'dmy', 'mdy', 'ymd']).default('auto'),
+});
+export type ImportMapping = z.output<typeof importMappingSchema>;
+
+export const importBatchInputSchema = z.object({
+  fileName: z.string().max(255).optional(),
+  source: z.enum(['csv', 'xlsx']),
+  rows: z.array(z.record(z.string(), z.string())).max(5000),
+  mapping: importMappingSchema,
+  /** Account the statement belongs to (optional). */
+  accountId: uuidSchema.nullable().optional(),
+  currency: currencySchema,
+  /** Only normalize and return a preview. */
+  dryRun: z.boolean().default(false),
+  /** Save the mapping as a reusable profile with this name. */
+  saveProfileAs: z.string().trim().min(1).max(120).optional(),
+});
+
+export const inboxCommitItemSchema = z.object({
+  id: uuidSchema,
+  kind: z.enum(INBOX_KINDS),
+  categoryId: optionalId,
+  incomeSourceId: optionalId,
+  transferAccountId: optionalId,
+  accountId: optionalId,
+  scope: scopeSchema.default('shared'),
+  ownerUserId: optionalId,
+  description: z.string().trim().min(1).max(255).optional(),
+});
+export type InboxCommitItem = z.input<typeof inboxCommitItemSchema>;
+
+export const inboxCommitSchema = z.object({
+  items: z.array(inboxCommitItemSchema).min(1).max(1000),
+  /** Create rules so similar descriptions get the same classification next time. */
+  remember: z.boolean().default(false),
+});
+
+export const inboxIgnoreSchema = z.object({ ids: z.array(uuidSchema).min(1).max(1000) });
+
+export const categorizationRuleInputSchema = z.object({
+  pattern: z.string().trim().min(2).max(255),
+  kind: z.enum(INBOX_KINDS),
+  categoryId: optionalId,
+  incomeSourceId: optionalId,
+  transferAccountId: optionalId,
+  scope: scopeSchema.default('shared'),
+  ownerUserId: optionalId,
+});
+export type CategorizationRuleInput = z.input<typeof categorizationRuleInputSchema>;
+
+export const transferInputSchema = z
+  .object({
+    fromAccountId: uuidSchema,
+    toAccountId: uuidSchema,
+    date: isoDateSchema,
+    amount: moneySchema,
+    /** Amount credited when the destination account uses another currency. */
+    toAmount: moneySchema.nullable().optional(),
+    description: z.string().trim().max(255).nullable().optional(),
+  })
+  .refine((v) => v.fromAccountId !== v.toAccountId, { message: 'Las cuentas deben ser distintas', path: ['toAccountId'] });
+export type TransferInput = z.input<typeof transferInputSchema>;

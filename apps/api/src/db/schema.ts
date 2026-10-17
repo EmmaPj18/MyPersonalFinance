@@ -23,6 +23,10 @@ import {
   CURRENCIES,
   DEBT_TYPES,
   DEDUCTION_CATEGORIES,
+  DIRECTIONS,
+  INBOX_KINDS,
+  INBOX_SOURCES,
+  INBOX_STATUSES,
   FX_PREFERRED_SOURCES,
   FX_SIDES,
   FX_SOURCES,
@@ -57,6 +61,10 @@ export const budgetLineKindEnum = pgEnum('budget_line_kind', BUDGET_LINE_KINDS);
 export const fxSourceEnum = pgEnum('fx_source', FX_SOURCES);
 export const fxPreferredSourceEnum = pgEnum('fx_preferred_source', FX_PREFERRED_SOURCES);
 export const fxSideEnum = pgEnum('fx_side', FX_SIDES);
+export const inboxSourceEnum = pgEnum('inbox_source', INBOX_SOURCES);
+export const inboxStatusEnum = pgEnum('inbox_status', INBOX_STATUSES);
+export const inboxKindEnum = pgEnum('inbox_kind', INBOX_KINDS);
+export const directionEnum = pgEnum('direction', DIRECTIONS);
 
 const money = (name: string) => numeric(name, { precision: 14, scale: 2 });
 const pct = (name: string) => numeric(name, { precision: 5, scale: 2 });
@@ -595,3 +603,119 @@ export const debtPayments = pgTable('debt_payments', {
   expenseId: uuid('expense_id').references(() => expenses.id, { onDelete: 'set null' }),
   createdAt: createdAt(),
 });
+
+// ---------------------------------------------------------------- transfers, import and review
+
+/** Money moved between two accounts of the household (not an expense). */
+export const accountTransfers = pgTable(
+  'account_transfers',
+  {
+    id: id(),
+    householdId: householdRef(),
+    fromAccountId: uuid('from_account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    toAccountId: uuid('to_account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    date: date('date').notNull(),
+    /** In `currency` (the origin account's). */
+    amount: money('amount').notNull(),
+    currency: currencyEnum('currency').notNull(),
+    /** Amount credited in the destination account's currency, when it differs. */
+    toAmount: money('to_amount'),
+    description: varchar('description', { length: 255 }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('account_transfers_household_idx').on(t.householdId, t.date),
+    check('account_transfers_distinct', sql`${t.fromAccountId} <> ${t.toAccountId}`),
+    check('account_transfers_positive', sql`${t.amount} > 0`),
+  ],
+);
+
+export const importBatches = pgTable('import_batches', {
+  id: id(),
+  householdId: householdRef(),
+  source: inboxSourceEnum('source').notNull(),
+  fileName: varchar('file_name', { length: 255 }),
+  rowCount: integer('row_count').notNull().default(0),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: createdAt(),
+});
+
+/** Saved column mapping for a bank's export format. */
+export const importProfiles = pgTable(
+  'import_profiles',
+  {
+    id: id(),
+    householdId: householdRef(),
+    name: varchar('name', { length: 120 }).notNull(),
+    mapping: jsonb('mapping').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('import_profiles_household_name_uq').on(t.householdId, sql`lower(${t.name})`)],
+);
+
+/** "When the description contains X, it's Y": suggestions for transactions under review. */
+export const categorizationRules = pgTable(
+  'categorization_rules',
+  {
+    id: id(),
+    householdId: householdRef(),
+    /** Normalized text (lowercase, no accents) the description must contain. */
+    pattern: varchar('pattern', { length: 255 }).notNull(),
+    kind: inboxKindEnum('kind').notNull(),
+    categoryId: uuid('category_id').references(() => categories.id, { onDelete: 'cascade' }),
+    incomeSourceId: uuid('income_source_id').references(() => incomeSources.id, { onDelete: 'cascade' }),
+    transferAccountId: uuid('transfer_account_id').references(() => accounts.id, { onDelete: 'cascade' }),
+    scope: scopeEnum('scope').notNull().default('shared'),
+    ownerUserId: uuid('owner_user_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('categorization_rules_household_pattern_uq').on(t.householdId, t.pattern)],
+);
+
+/** Transactions imported from files or emails, waiting to be reviewed. */
+export const transactionInbox = pgTable(
+  'transaction_inbox',
+  {
+    id: id(),
+    householdId: householdRef(),
+    source: inboxSourceEnum('source').notNull(),
+    batchId: uuid('batch_id').references(() => importBatches.id, { onDelete: 'set null' }),
+    /** Row number, email message id... */
+    externalRef: varchar('external_ref', { length: 255 }),
+    /** Same transaction imported twice is skipped. */
+    dedupeHash: varchar('dedupe_hash', { length: 64 }).notNull(),
+    date: date('date').notNull(),
+    description: varchar('description', { length: 255 }).notNull(),
+    amount: money('amount').notNull(),
+    currency: currencyEnum('currency').notNull(),
+    direction: directionEnum('direction').notNull(),
+    accountId: uuid('account_id').references(() => accounts.id, { onDelete: 'set null' }),
+    // Classification (suggested by rules, edited during review)
+    kind: inboxKindEnum('kind').notNull(),
+    categoryId: uuid('category_id').references(() => categories.id, { onDelete: 'set null' }),
+    incomeSourceId: uuid('income_source_id').references(() => incomeSources.id, { onDelete: 'set null' }),
+    transferAccountId: uuid('transfer_account_id').references(() => accounts.id, { onDelete: 'set null' }),
+    scope: scopeEnum('scope').notNull().default('shared'),
+    ownerUserId: uuid('owner_user_id').references(() => users.id),
+    ruleId: uuid('rule_id').references(() => categorizationRules.id, { onDelete: 'set null' }),
+    /** Existing expense that looks like the same transaction. */
+    duplicateOfExpenseId: uuid('duplicate_of_expense_id').references(() => expenses.id, { onDelete: 'set null' }),
+    raw: jsonb('raw'),
+    status: inboxStatusEnum('status').notNull().default('pending'),
+    expenseId: uuid('expense_id').references(() => expenses.id, { onDelete: 'set null' }),
+    incomeEntryId: uuid('income_entry_id').references(() => incomeEntries.id, { onDelete: 'set null' }),
+    transferId: uuid('transfer_id').references(() => accountTransfers.id, { onDelete: 'set null' }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('transaction_inbox_dedupe_uq').on(t.householdId, t.dedupeHash),
+    index('transaction_inbox_status_idx').on(t.householdId, t.status, t.date),
+    check('transaction_inbox_amount_positive', sql`${t.amount} > 0`),
+  ],
+);
