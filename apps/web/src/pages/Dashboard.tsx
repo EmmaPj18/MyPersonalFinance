@@ -21,7 +21,8 @@ export const DashboardPage = () => {
   const { month, currency, view, nameOf } = usePrefs();
   const report = useMonthlyReport(month, currency, view);
   const year = useYearlyReport(Number(month.slice(0, 4)), currency, view);
-  const budget = useBudget(month);
+  const budget = useBudget(Number(month.slice(0, 4)));
+  const monthIndex = Number(month.slice(5, 7)) - 1;
   const goals = useGoals();
   const debts = useDebts();
   const money = (v: string | number) => formatMoney(v, currency);
@@ -158,10 +159,17 @@ export const DashboardPage = () => {
         </Card>
 
         <Card>
-          <CardHeader title="Presupuesto" subtitle={budget.data?.budgetId ? `${money(budget.data.totals.actual)} de ${money(budget.data.totals.planned)}` : undefined} />
-          {!budget.data?.items.length ? (
+          <CardHeader
+            title="Presupuesto del mes"
+            subtitle={
+              budget.data?.planId
+                ? `${money(budget.data.totals.expense.actual[monthIndex] ?? 0)} de ${money(budget.data.totals.expense.plan[monthIndex] ?? 0)} (${budget.data.currency})`
+                : undefined
+            }
+          />
+          {!budget.data?.lines.some((l) => l.kind === 'expense') ? (
             <EmptyState
-              title="Sin presupuesto este mes"
+              title="Sin presupuesto este año"
               action={
                 <Link to="/presupuesto" className="text-sm font-medium text-primary">
                   Crear presupuesto
@@ -170,19 +178,22 @@ export const DashboardPage = () => {
             />
           ) : (
             <ul className="flex flex-col gap-3 px-4 py-3 sm:px-5">
-              {budget.data.items.slice(0, 6).map((i) => {
-                const used = Number(i.actual) + Number(i.pending);
-                const pct = Number(i.plannedAmount) ? (used / Number(i.plannedAmount)) * 100 : 0;
-                return (
-                  <li key={i.id} className="text-sm">
-                    <div className="mb-1 flex justify-between gap-2">
-                      <span className="truncate">{i.categoryName}</span>
-                      <span className="tabular text-muted">{formatPct(pct)}</span>
-                    </div>
-                    <ProgressBar value={pct} tone={pct > 100 ? 'danger' : pct > 85 ? 'warning' : 'primary'} />
-                  </li>
-                );
-              })}
+              {budget.data.lines
+                .filter((l) => l.kind === 'expense' && Number(l.plan[monthIndex]) > 0)
+                .sort((a, b) => Number(b.plan[monthIndex]) - Number(a.plan[monthIndex]))
+                .slice(0, 6)
+                .map((l) => {
+                  const pct = (Number(l.actual[monthIndex]) / Number(l.plan[monthIndex])) * 100;
+                  return (
+                    <li key={l.id} className="text-sm">
+                      <div className="mb-1 flex justify-between gap-2">
+                        <span className="truncate">{l.name}</span>
+                        <span className="tabular text-muted">{formatPct(pct)}</span>
+                      </div>
+                      <ProgressBar value={pct} tone={pct > 100 ? 'danger' : pct > 85 ? 'warning' : 'primary'} />
+                    </li>
+                  );
+                })}
             </ul>
           )}
         </Card>

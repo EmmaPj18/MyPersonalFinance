@@ -6,6 +6,7 @@ import { assertCanEdit, assertMembers, assertOwners, visibilityFilter } from '..
 import { notFound } from '../../lib/errors';
 import { FxResolver } from '../../lib/fx';
 import { currentUser } from '../../plugins/auth';
+import { transferMovements } from '../import/service';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -35,6 +36,8 @@ export const accountRoutes: FastifyPluginAsyncZod = async (app) => {
         select account_id, currency, net_amount as amount from income_entries where household_id = ${user.householdId} and account_id is not null
         union all
         select account_id, currency, -amount from expenses where household_id = ${user.householdId} and account_id is not null and status = 'paid'
+        union all
+        ${transferMovements(user.householdId)}
       ) m group by account_id, currency`);
     const fx = await FxResolver.load(db, user.householdId);
     const date = today();

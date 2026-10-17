@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PRIVACY_MODES, USER_ROLES } from '../constants';
+import { FX_PREFERRED_SOURCES, FX_SIDES, PRIVACY_MODES, USER_ROLES } from '../constants';
 import { currencySchema, pctSchema } from './common';
 
 export const emailSchema = z
@@ -41,6 +41,10 @@ export const updateHouseholdSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   baseCurrency: currencySchema.optional(),
   privacyMode: z.enum(PRIVACY_MODES).optional(),
+  fxSource: z.enum(FX_PREFERRED_SOURCES).optional(),
+  /** Infodolar entity; required when fxSource = infodolar. */
+  fxEntity: z.string().trim().max(120).nullable().optional(),
+  fxSide: z.enum(FX_SIDES).optional(),
 });
 export type UpdateHouseholdInput = z.infer<typeof updateHouseholdSchema>;
 

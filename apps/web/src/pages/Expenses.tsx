@@ -1,5 +1,5 @@
 import { occurrencesPerYear, type Currency, type ExpenseNature, type Scope } from '@mypersonalfinance/shared';
-import { CalendarClock, CheckCircle2, Pencil, Plus, Repeat, Trash2, UserRoundCog, Zap } from 'lucide-react';
+import { CalendarClock, CheckCircle2, FileUp, Pencil, Plus, Repeat, Trash2, UserRoundCog, Zap } from 'lucide-react';
 import { useState } from 'react';
 import { Money, OwnerBadge } from '../components/finance';
 import { MonthPicker } from '../components/layout/AppLayout';
@@ -22,11 +22,13 @@ import {
 import { usePrefs } from '../context/prefs';
 import { api } from '../lib/api';
 import { formatDate, formatMoney, formatMonth, formatShortDate, RECURRENCE_LABELS } from '../lib/format';
-import { useAccounts, useApiMutation, useCategories, useExpenses, useRecurringExpenses, useUpcomingExpenses } from '../lib/queries';
+import { useAccounts, useApiMutation, useCategories, useExpenses, useInbox, useRecurringExpenses, useUpcomingExpenses } from '../lib/queries';
 import type { Expense, RecurringExpense } from '../lib/types';
 import { ExpenseForm, PayForm, ReassignForm, RecurringForm } from './expenses/forms';
+import { ImportWizard } from './expenses/ImportWizard';
+import { ReviewInbox } from './expenses/ReviewInbox';
 
-type Tab = 'movements' | 'fixed';
+type Tab = 'movements' | 'fixed' | 'review';
 type NatureFilter = 'all' | ExpenseNature;
 type ScopeFilter = 'all' | Scope;
 
@@ -244,6 +246,8 @@ export const ExpensesPage = () => {
   const [modal, setModal] = useState<ModalState>(null);
   const [applyTo, setApplyTo] = useState<'future' | 'all'>('future');
   const categories = useCategories();
+  const inbox = useInbox();
+  const [importing, setImporting] = useState(false);
 
   const expenses = useExpenses({
     month,
@@ -291,6 +295,11 @@ export const ExpensesPage = () => {
                 Nuevo gasto
               </Button>
             )}
+            {canWrite && (
+              <Button variant="secondary" icon={<FileUp className="size-4" />} onClick={() => setImporting(true)}>
+                Importar archivo
+              </Button>
+            )}
             {canWrite && tab === 'fixed' && (
               <Button icon={<Plus className="size-4" />} onClick={() => setModal({ kind: 'recurring' })}>
                 Nuevo gasto fijo
@@ -308,6 +317,7 @@ export const ExpensesPage = () => {
           options={[
             { value: 'movements', label: 'Movimientos' },
             { value: 'fixed', label: 'Gastos fijos' },
+            { value: 'review', label: `Por revisar${inbox.data?.length ? ` (${inbox.data.length})` : ''}` },
           ]}
         />
         {tab === 'movements' && (
@@ -373,6 +383,14 @@ export const ExpensesPage = () => {
       )}
 
       {tab === 'fixed' && <FixedExpenses onAction={setModal} />}
+      {tab === 'review' && <ReviewInbox />}
+      <ImportWizard
+        open={importing}
+        onClose={() => {
+          setImporting(false);
+          setTab('review');
+        }}
+      />
 
       <Modal open={modal?.kind === 'expense'} onClose={close} title={modal?.kind === 'expense' && modal.expense ? 'Editar gasto' : 'Nuevo gasto'} wide>
         {modal?.kind === 'expense' && (
