@@ -22,6 +22,20 @@
       "when": 1792255524939,
       "tag": "0002_managed_members",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792256086689,
+      "tag": "0003_annual_budget",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792256089168,
+      "tag": "0004_drop_monthly_budget",
+      "breakpoints": true
     }
   ]
 }

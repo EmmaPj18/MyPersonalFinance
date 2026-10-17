@@ -76,5 +76,9 @@ export type RecurrenceFrequency = (typeof RECURRENCE_FREQUENCIES)[number];
 export const WEEKEND_RULES = ['none', 'previous', 'next'] as const;
 export type WeekendRule = (typeof WEEKEND_RULES)[number];
 
+/** Annual budget line kinds. */
+export const BUDGET_LINE_KINDS = ['income', 'expense', 'saving'] as const;
+export type BudgetLineKind = (typeof BUDGET_LINE_KINDS)[number];
+
 export const DEBT_TYPES = ['loan', 'credit_card', 'mortgage', 'other'] as const;
 export type DebtType = (typeof DEBT_TYPES)[number];

@@ -19,6 +19,7 @@ import {
 import {
   ACCOUNT_STATUSES,
   ACCOUNT_TYPES,
+  BUDGET_LINE_KINDS,
   CURRENCIES,
   DEBT_TYPES,
   DEDUCTION_CATEGORIES,
@@ -49,6 +50,7 @@ export const accountTypeEnum = pgEnum('account_type', ACCOUNT_TYPES);
 export const recurrenceFrequencyEnum = pgEnum('recurrence_frequency', RECURRENCE_FREQUENCIES);
 export const debtTypeEnum = pgEnum('debt_type', DEBT_TYPES);
 export const weekendRuleEnum = pgEnum('weekend_rule', WEEKEND_RULES);
+export const budgetLineKindEnum = pgEnum('budget_line_kind', BUDGET_LINE_KINDS);
 
 const money = (name: string) => numeric(name, { precision: 14, scale: 2 });
 const pct = (name: string) => numeric(name, { precision: 5, scale: 2 });
@@ -437,42 +439,58 @@ export const expenseSplits = pgTable(
 
 // ---------------------------------------------------------------- budgets
 
-export const budgets = pgTable(
-  'budgets',
+/** Annual budget of a household. */
+export const budgetPlans = pgTable(
+  'budget_plans',
   {
     id: id(),
     householdId: householdRef(),
-    /** First day of the month. */
-    month: date('month').notNull(),
+    year: integer('year').notNull(),
     currency: currencyEnum('currency').notNull(),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('budgets_household_month_uq').on(t.householdId, t.month)],
+  (t) => [uniqueIndex('budget_plans_household_year_uq').on(t.householdId, t.year)],
 );
 
-export const budgetItems = pgTable(
-  'budget_items',
+/** One row of the annual budget: an income source, an expense category or a savings goal. */
+export const budgetLines = pgTable(
+  'budget_lines',
   {
     id: id(),
-    budgetId: uuid('budget_id')
+    planId: uuid('plan_id')
       .notNull()
-      .references(() => budgets.id, { onDelete: 'cascade' }),
-    categoryId: uuid('category_id')
-      .notNull()
-      .references(() => categories.id, { onDelete: 'cascade' }),
+      .references(() => budgetPlans.id, { onDelete: 'cascade' }),
+    kind: budgetLineKindEnum('kind').notNull(),
+    categoryId: uuid('category_id').references(() => categories.id, { onDelete: 'cascade' }),
+    incomeSourceId: uuid('income_source_id').references(() => incomeSources.id, { onDelete: 'cascade' }),
+    goalId: uuid('goal_id').references(() => savingsGoals.id, { onDelete: 'cascade' }),
     scope: scopeEnum('scope').notNull(),
     ownerUserId: uuid('owner_user_id').references(() => users.id),
-    plannedAmount: money('planned_amount').notNull(),
+    /** Expense lines: fixed or variable (groups the grid). */
+    nature: expenseNatureEnum('nature'),
+    sortOrder: integer('sort_order').notNull().default(0),
   },
   (t) => [
-    uniqueIndex('budget_items_uq').on(
-      t.budgetId,
-      t.categoryId,
-      t.scope,
-      sql`coalesce(${t.ownerUserId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+    index('budget_lines_plan_idx').on(t.planId),
+    ownerScopeCheck('budget_lines_owner_scope', t.scope, t.ownerUserId),
+    check(
+      'budget_lines_target',
+      sql`(${t.kind} = 'expense' AND ${t.categoryId} IS NOT NULL) OR (${t.kind} = 'income' AND ${t.incomeSourceId} IS NOT NULL) OR (${t.kind} = 'saving' AND ${t.goalId} IS NOT NULL)`,
     ),
-    ownerScopeCheck('budget_items_owner_scope', t.scope, t.ownerUserId),
   ],
+);
+
+/** Planned amount of a line for one month (1–12), in the plan's currency. */
+export const budgetLineAmounts = pgTable(
+  'budget_line_amounts',
+  {
+    lineId: uuid('line_id')
+      .notNull()
+      .references(() => budgetLines.id, { onDelete: 'cascade' }),
+    month: integer('month').notNull(),
+    amount: money('amount').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.lineId, t.month] }), check('budget_line_amounts_month', sql`${t.month} BETWEEN 1 AND 12`)],
 );
 
 // ---------------------------------------------------------------- goals & debts

@@ -4,7 +4,7 @@ import { api, ApiError } from './api';
 import type {
   Account,
   AuditEntry,
-  BudgetView,
+  AnnualBudget,
   Category,
   Debt,
   DeductionType,
@@ -75,8 +75,8 @@ export const useUpcomingExpenses = (days = 30) =>
     queryFn: () => api.get<UpcomingExpense[]>('/recurring-expenses/upcoming', { days }),
   });
 
-export const useBudget = (month: string) =>
-  useQuery({ queryKey: ['budget', month], queryFn: () => api.get<BudgetView>(`/budgets/${month}`) });
+export const useBudget = (year: number) =>
+  useQuery({ queryKey: ['budget', year], queryFn: () => api.get<AnnualBudget>(`/budgets/${year}`) });
 
 export const useGoals = () => useQuery({ queryKey: ['goals'], queryFn: () => api.get<Goal[]>('/goals') });
 export const useDebts = () => useQuery({ queryKey: ['debts'], queryFn: () => api.get<Debt[]>('/debts') });

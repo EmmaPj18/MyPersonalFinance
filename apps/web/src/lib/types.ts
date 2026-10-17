@@ -1,6 +1,7 @@
 import type {
   AccountStatus,
   AccountType,
+  BudgetLineKind,
   Currency,
   DebtType,
   DeductionCategory,
@@ -218,26 +219,45 @@ export interface AuditEntry {
   userName: string | null;
 }
 
-export interface BudgetView {
-  month: string;
+export interface BudgetLine {
+  id: string;
+  kind: BudgetLineKind;
+  categoryId: string | null;
+  incomeSourceId: string | null;
+  goalId: string | null;
+  scope: Scope;
+  ownerUserId: string | null;
+  nature: ExpenseNature | null;
+  name: string;
+  color: string | null;
+  /** 12 values, January to December. */
+  plan: string[];
+  actual: string[];
+  planTotal: string;
+  actualTotal: string;
+}
+
+export interface BudgetTotals {
+  plan: string[];
+  actual: string[];
+  planTotal: string;
+  actualTotal: string;
+}
+
+export interface AnnualBudget {
+  year: number;
   currency: Currency;
-  budgetId: string | null;
-  items: {
-    id: string;
-    categoryId: string;
-    categoryName: string;
-    color: string | null;
-    nature: ExpenseNature;
-    scope: Scope;
-    ownerUserId: string | null;
-    plannedAmount: string;
-    actual: string;
-    pending: string;
-    remaining: string;
-  }[];
-  unbudgeted: { categoryId: string | null; categoryName: string; scope: Scope; ownerUserId: string | null; actual: string; pending: string }[];
-  suggestions: { categoryId: string; scope: Scope; ownerUserId: string | null; amount: string }[];
-  totals: { planned: string; actual: string; pending: string };
+  planId: string | null;
+  lines: BudgetLine[];
+  unbudgeted: { categoryId: string; name: string; color: string | null; scope: Scope; ownerUserId: string | null; actual: string[]; actualTotal: string }[];
+  totals: { income: BudgetTotals; expense: BudgetTotals; saving: BudgetTotals };
+  missingRates: string[];
+}
+
+export interface BudgetSuggestions {
+  currency: Currency;
+  lines: (Pick<BudgetLine, 'kind' | 'categoryId' | 'incomeSourceId' | 'goalId' | 'scope' | 'ownerUserId' | 'nature'> & { amounts: string[] })[];
+  skippedWithoutCategory: number;
   missingRates: string[];
 }
 

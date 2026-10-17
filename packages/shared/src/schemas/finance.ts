@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   ACCOUNT_TYPES,
+  BUDGET_LINE_KINDS,
   DEBT_TYPES,
   DEDUCTION_CATEGORIES,
   EXPENSE_NATURES,
@@ -200,18 +201,34 @@ export type RecurringExpenseInput = z.input<typeof recurringExpenseInputSchema>;
 
 // ---------------------------------------------------------------- budgets
 
-export const budgetInputSchema = z.object({
-  currency: currencySchema,
-  items: z.array(
-    z.object({
-      categoryId: uuidSchema,
-      scope: scopeSchema,
-      ownerUserId: optionalId,
-      plannedAmount: moneySchema,
-    }),
-  ),
+export const budgetLineInputSchema = z.object({
+  kind: z.enum(BUDGET_LINE_KINDS),
+  /** expense lines */
+  categoryId: optionalId,
+  /** income lines */
+  incomeSourceId: optionalId,
+  /** saving lines */
+  goalId: optionalId,
+  scope: scopeSchema.default('shared'),
+  ownerUserId: optionalId,
+  nature: z.enum(EXPENSE_NATURES).nullable().optional(),
+  /** Planned amount for each month, January to December, in the plan's currency. */
+  amounts: z.array(moneySchema).length(12),
 });
-export type BudgetInput = z.input<typeof budgetInputSchema>;
+export type BudgetLineInput = z.input<typeof budgetLineInputSchema>;
+
+export const budgetPlanInputSchema = z.object({
+  currency: currencySchema,
+  lines: z.array(budgetLineInputSchema),
+});
+export type BudgetPlanInput = z.input<typeof budgetPlanInputSchema>;
+
+export const copyBudgetInputSchema = z.object({
+  /** Percentage applied to every amount, e.g. 5 = +5%. */
+  adjustPct: z.coerce.number().min(-100).max(1000).default(0),
+});
+
+export const yearParamsSchema = z.object({ year: z.coerce.number().int().min(2000).max(2100) });
 
 // ---------------------------------------------------------------- goals & debts
 
