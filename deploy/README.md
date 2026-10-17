@@ -3,7 +3,7 @@
 Cada merge a `main` ejecuta `.github/workflows/deploy.yml`:
 
 1. **CI**: typecheck, tests (con Postgres) y build.
-2. **Imágenes**: `ghcr.io/emmapj18/mypersonalfinance-api` y `-web` (`linux/amd64` y `linux/arm64`), tags `latest` y `sha-<commit>`.
+2. **Imágenes**: `ghcr.io/emmapj18/mypersonalfinance-api` y `-web` (`linux/amd64`, la arquitectura del servidor), tags `latest` y `sha-<commit>`.
 3. **Deploy**: `deploy/portainer-deploy.sh` crea o actualiza el stack `mypersonalfinance` en Portainer con `deploy/docker-compose.server.yml`, el tag nuevo y `pullImage`.
 4. **Salud**: espera a que `${APP_URL}/api/health` responda.
 
