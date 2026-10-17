@@ -112,7 +112,7 @@ export const moveUser = async (
     where household_id = ${from} and scope = 'personal' and owner_user_id = ${userId}`);
   await tx.execute(sql`update savings_goals set household_id = ${to} where household_id = ${from} and owner_user_id = ${userId}`);
   await tx.execute(sql`update debts set household_id = ${to} where household_id = ${from} and owner_user_id = ${userId}`);
-  await moveBudgetItems(tx, userId, from, to);
+  await moveBudgetLines(tx, userId, from, to);
 
   // 2. Remap catalogs (categories, deduction types) by name into the destination household.
   await remapCategories(tx, to);
@@ -155,25 +155,25 @@ export const moveUser = async (
   return { householdId: to, role: destination.role, moved: summary.moves };
 };
 
-const moveBudgetItems = async (tx: Tx, userId: string, from: string, to: string) => {
-  // Make sure the destination has a budget for each month the user had personal items.
+const moveBudgetLines = async (tx: Tx, userId: string, from: string, to: string) => {
+  // Make sure the destination has a plan for each year the user had personal lines.
   await tx.execute(sql`
-    insert into budgets (household_id, month, currency)
-    select distinct ${to}::uuid, b.month, b.currency
-    from budget_items i join budgets b on b.id = i.budget_id
-    where b.household_id = ${from} and i.scope = 'personal' and i.owner_user_id = ${userId}
+    insert into budget_plans (household_id, year, currency)
+    select distinct ${to}::uuid, p.year, p.currency
+    from budget_lines l join budget_plans p on p.id = l.plan_id
+    where p.household_id = ${from} and l.scope = 'personal' and l.owner_user_id = ${userId}
     on conflict do nothing`);
-  // Only items whose destination budget uses the same currency can be moved without a conversion;
+  // Only lines whose destination plan uses the same currency can be moved without a conversion;
   // the rest are dropped (they are plans, not transactions).
   await tx.execute(sql`
-    update budget_items i set budget_id = nb.id
-    from budgets ob, budgets nb
-    where ob.id = i.budget_id and ob.household_id = ${from}
-      and nb.household_id = ${to} and nb.month = ob.month and nb.currency = ob.currency
-      and i.scope = 'personal' and i.owner_user_id = ${userId}`);
+    update budget_lines l set plan_id = np.id
+    from budget_plans op, budget_plans np
+    where op.id = l.plan_id and op.household_id = ${from}
+      and np.household_id = ${to} and np.year = op.year and np.currency = op.currency
+      and l.scope = 'personal' and l.owner_user_id = ${userId}`);
   await tx.execute(sql`
-    delete from budget_items i using budgets b
-    where b.id = i.budget_id and b.household_id = ${from} and i.scope = 'personal' and i.owner_user_id = ${userId}`);
+    delete from budget_lines l using budget_plans p
+    where p.id = l.plan_id and p.household_id = ${from} and l.scope = 'personal' and l.owner_user_id = ${userId}`);
 };
 
 /** Points every category reference of `householdId` rows to a category of that same household. */
@@ -181,7 +181,7 @@ const remapCategories = async (tx: Tx, householdId: string) => {
   const foreign = sql`
     select category_id as id from expenses where household_id = ${householdId} and category_id is not null
     union select category_id from recurring_expenses where household_id = ${householdId} and category_id is not null
-    union select i.category_id from budget_items i join budgets b on b.id = i.budget_id where b.household_id = ${householdId}`;
+    union select l.category_id from budget_lines l join budget_plans p on p.id = l.plan_id where p.household_id = ${householdId} and l.category_id is not null`;
   // Create missing categories (matched by name, case-insensitive).
   await tx.execute(sql`
     insert into categories (household_id, name, color, icon, default_nature)
@@ -196,8 +196,8 @@ const remapCategories = async (tx: Tx, householdId: string) => {
     where e.household_id = ${householdId} and e.category_id = m.old_id`);
   await tx.execute(sql`update recurring_expenses e set category_id = m.new_id from (${mapping}) m
     where e.household_id = ${householdId} and e.category_id = m.old_id`);
-  await tx.execute(sql`update budget_items i set category_id = m.new_id from (${mapping}) m, budgets b
-    where b.id = i.budget_id and b.household_id = ${householdId} and i.category_id = m.old_id`);
+  await tx.execute(sql`update budget_lines l set category_id = m.new_id from (${mapping}) m, budget_plans p
+    where p.id = l.plan_id and p.household_id = ${householdId} and l.category_id = m.old_id`);
 };
 
 const remapDeductionTypes = async (tx: Tx, householdId: string) => {
@@ -222,7 +222,11 @@ const remapDeductionTypes = async (tx: Tx, householdId: string) => {
 /** Nulls out optional references from `householdId` rows to records of another household. */
 const detachForeignReferences = async (tx: Tx, householdId: string) => {
   const ownAccounts = sql`(select id from accounts where household_id = ${householdId})`;
-  for (const table of ['income_sources', 'income_entries', 'expenses', 'recurring_expenses', 'savings_goals']) {
+  // Transfers between the household's accounts can't involve an account that moved away.
+  await tx.execute(sql`
+    delete from account_transfers
+    where household_id = ${householdId} and (from_account_id not in ${ownAccounts} or to_account_id not in ${ownAccounts})`);
+  for (const table of ['income_sources', 'income_entries', 'expenses', 'recurring_expenses', 'savings_goals', 'transaction_inbox']) {
     await tx.execute(sql`
       update ${sql.identifier(table)} set account_id = null
       where household_id = ${householdId} and account_id is not null and account_id not in ${ownAccounts}`);
@@ -231,8 +235,53 @@ const detachForeignReferences = async (tx: Tx, householdId: string) => {
     update expenses set recurring_expense_id = null
     where household_id = ${householdId} and recurring_expense_id is not null
       and recurring_expense_id not in (select id from recurring_expenses where household_id = ${householdId})`);
+  // Budget lines can't point to an income source or goal that now lives in another household.
+  await tx.execute(sql`
+    delete from budget_lines l using budget_plans p
+    where p.id = l.plan_id and p.household_id = ${householdId}
+      and ((l.income_source_id is not null and l.income_source_id not in (select id from income_sources where household_id = ${householdId}))
+        or (l.goal_id is not null and l.goal_id not in (select id from savings_goals where household_id = ${householdId})))`);
   await tx.execute(sql`
     update debt_payments p set expense_id = null
     from debts d, expenses e
     where d.id = p.debt_id and e.id = p.expense_id and d.household_id = ${householdId} and e.household_id <> ${householdId}`);
+};
+
+/** Split tables keyed by (record, user): merging must add up shares instead of duplicating rows. */
+const SPLIT_TABLES = [
+  { table: 'expense_splits', key: 'expense_id', extra: ', share_amount = t.share_amount + m.share_amount' },
+  { table: 'income_splits', key: 'income_entry_id', extra: '' },
+  { table: 'recurring_expense_splits', key: 'recurring_expense_id', extra: '' },
+] as const;
+
+/**
+ * Hands everything that references a managed member (splits, "paid by", history...) over to a
+ * real user, then deletes the managed member. Used when someone claims a managed member's
+ * account with an account they already had.
+ */
+export const mergeManagedMember = async (tx: Tx, managedId: string, userId: string) => {
+  for (const { table, key, extra } of SPLIT_TABLES) {
+    const t = sql.identifier(table);
+    const k = sql.identifier(key);
+    // Same record already split with the real user: add the managed member's share to it.
+    await tx.execute(sql`
+      update ${t} t set share_pct = t.share_pct + m.share_pct${sql.raw(extra)}
+      from ${t} m
+      where m.user_id = ${managedId} and t.user_id = ${userId} and t.${k} = m.${k}`);
+    await tx.execute(sql`
+      delete from ${t} m using ${t} t
+      where m.user_id = ${managedId} and t.user_id = ${userId} and t.${k} = m.${k}`);
+  }
+  // Every other foreign key to users, discovered from the catalog so new tables are covered too.
+  const fks = await tx.execute<{ table_name: string; column_name: string }>(sql`
+    select c.conrelid::regclass::text as table_name, a.attname as column_name
+    from pg_constraint c
+    join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any(c.conkey)
+    where c.contype = 'f' and c.confrelid = 'users'::regclass`);
+  for (const { table_name, column_name } of fks.rows) {
+    await tx.execute(
+      sql`update ${sql.identifier(table_name)} set ${sql.identifier(column_name)} = ${userId} where ${sql.identifier(column_name)} = ${managedId}`,
+    );
+  }
+  await tx.delete(users).where(eq(users.id, managedId));
 };

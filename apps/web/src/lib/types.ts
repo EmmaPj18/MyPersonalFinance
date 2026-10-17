@@ -1,5 +1,11 @@
 import type {
+  AccountStatus,
   AccountType,
+  BudgetLineKind,
+  FxPreferredSource,
+  FxSide,
+  ImportMapping,
+  InboxKind,
   Currency,
   DebtType,
   DeductionCategory,
@@ -28,10 +34,12 @@ export interface Me {
 export interface Member {
   id: string;
   name: string;
-  email: string;
+  /** Null for members without an account. */
+  email: string | null;
   role: UserRole;
   defaultSplitPct: string | null;
   defaultCurrency: Currency;
+  accountStatus: AccountStatus;
 }
 
 export interface Household {
@@ -84,6 +92,76 @@ export interface FxRate {
   fromCurrency: Currency;
   toCurrency: Currency;
   rate: string;
+}
+
+export interface MarketQuote {
+  source: 'bcrd' | 'ecb' | 'erapi' | 'infodolar';
+  entity: string;
+  date: string;
+  fromCurrency: Currency;
+  toCurrency: Currency;
+  buy: string | null;
+  sell: string | null;
+  mid: string;
+}
+
+export interface MarketRates {
+  preference: { fxSource: FxPreferredSource; fxEntity: string | null; fxSide: FxSide };
+  today: string;
+  lastFetchedAt: string | null;
+  effective: { USD_DOP: string | null; EUR_DOP: string | null; EUR_USD: string | null };
+  quotes: MarketQuote[];
+}
+
+export interface InboxItem {
+  id: string;
+  source: 'csv' | 'xlsx' | 'email';
+  date: string;
+  description: string;
+  amount: string;
+  currency: Currency;
+  direction: 'debit' | 'credit';
+  accountId: string | null;
+  kind: InboxKind;
+  categoryId: string | null;
+  incomeSourceId: string | null;
+  transferAccountId: string | null;
+  scope: Scope;
+  ownerUserId: string | null;
+  ruleId: string | null;
+  duplicateOfExpenseId: string | null;
+  status: 'pending' | 'imported' | 'ignored';
+}
+
+export interface CategorizationRule {
+  id: string;
+  pattern: string;
+  kind: InboxKind;
+  categoryId: string | null;
+  incomeSourceId: string | null;
+  transferAccountId: string | null;
+  scope: Scope;
+  ownerUserId: string | null;
+}
+
+export interface ParsedImport {
+  fileName: string;
+  source: 'csv' | 'xlsx';
+  headers: string[];
+  rows: Record<string, string>[];
+  suggested: ImportMapping;
+  profileName: string | null;
+}
+
+export interface Transfer {
+  id: string;
+  fromAccountId: string;
+  toAccountId: string;
+  date: string;
+  amount: string;
+  currency: Currency;
+  toAmount: string | null;
+  description: string | null;
 }
 
 export interface Split {
@@ -215,26 +293,45 @@ export interface AuditEntry {
   userName: string | null;
 }
 
-export interface BudgetView {
-  month: string;
+export interface BudgetLine {
+  id: string;
+  kind: BudgetLineKind;
+  categoryId: string | null;
+  incomeSourceId: string | null;
+  goalId: string | null;
+  scope: Scope;
+  ownerUserId: string | null;
+  nature: ExpenseNature | null;
+  name: string;
+  color: string | null;
+  /** 12 values, January to December. */
+  plan: string[];
+  actual: string[];
+  planTotal: string;
+  actualTotal: string;
+}
+
+export interface BudgetTotals {
+  plan: string[];
+  actual: string[];
+  planTotal: string;
+  actualTotal: string;
+}
+
+export interface AnnualBudget {
+  year: number;
   currency: Currency;
-  budgetId: string | null;
-  items: {
-    id: string;
-    categoryId: string;
-    categoryName: string;
-    color: string | null;
-    nature: ExpenseNature;
-    scope: Scope;
-    ownerUserId: string | null;
-    plannedAmount: string;
-    actual: string;
-    pending: string;
-    remaining: string;
-  }[];
-  unbudgeted: { categoryId: string | null; categoryName: string; scope: Scope; ownerUserId: string | null; actual: string; pending: string }[];
-  suggestions: { categoryId: string; scope: Scope; ownerUserId: string | null; amount: string }[];
-  totals: { planned: string; actual: string; pending: string };
+  planId: string | null;
+  lines: BudgetLine[];
+  unbudgeted: { categoryId: string; name: string; color: string | null; scope: Scope; ownerUserId: string | null; actual: string[]; actualTotal: string }[];
+  totals: { income: BudgetTotals; expense: BudgetTotals; saving: BudgetTotals };
+  missingRates: string[];
+}
+
+export interface BudgetSuggestions {
+  currency: Currency;
+  lines: (Pick<BudgetLine, 'kind' | 'categoryId' | 'incomeSourceId' | 'goalId' | 'scope' | 'ownerUserId' | 'nature'> & { amounts: string[] })[];
+  skippedWithoutCategory: number;
   missingRates: string[];
 }
 

@@ -4,7 +4,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { accounts, categories, debtPayments, debts, expenses } from '../../db/schema';
-import { assertCanEdit, assertInHousehold, assertMembers, resolveSplits, visibilityFilter } from '../../lib/access';
+import { assertCanEdit, assertInHousehold, assertMembers, assertOwners, resolveSplits, visibilityFilter } from '../../lib/access';
 import { badRequest, notFound } from '../../lib/errors';
 import { currentUser, type AuthUser } from '../../plugins/auth';
 import { writeSplits } from '../expenses/service';
@@ -54,7 +54,7 @@ export const debtRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post('/debts', { preHandler: app.requireWriter, schema: { body: debtInputSchema } }, async (request, reply) => {
     const user = currentUser(request);
     const input = request.body;
-    await assertMembers(db, user.householdId, [input.ownerUserId]);
+    await assertOwners(db, user.householdId, [input.ownerUserId]);
     assertCanEdit(user, input.ownerUserId ?? null);
     const [row] = await db
       .insert(debts)
@@ -76,7 +76,7 @@ export const debtRoutes: FastifyPluginAsyncZod = async (app) => {
       const existing = await findDebt(user, request.params.id);
       assertCanEdit(user, existing.ownerUserId);
       const input = request.body;
-      await assertMembers(db, user.householdId, [input.ownerUserId]);
+      await assertOwners(db, user.householdId, [input.ownerUserId]);
       assertCanEdit(user, input.ownerUserId ?? null);
       const [row] = await db
         .update(debts)

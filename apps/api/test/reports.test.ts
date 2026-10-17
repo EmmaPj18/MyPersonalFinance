@@ -44,8 +44,9 @@ describe('reports, FX and budgets', () => {
     expect(report.income.gross).toBe('0.00');
   });
 
-  it('budget vs actual, suggestions from fixed expenses and copy from previous month', async () => {
+  it('annual budget: plan vs actual per month, suggestions and copy to next year', async () => {
     const { owner } = await createCouple(ctx);
+    const hid = owner.me.household.id;
     const food = await categoryId(owner, 'Supermercado');
     const housing = await categoryId(owner, 'Vivienda');
     await owner.ok('POST', '/recurring-expenses', {
@@ -57,33 +58,63 @@ describe('reports, FX and budgets', () => {
       dueDay: 1,
       startDate: '2026-10-01',
     });
+    const account = await owner.ok('POST', '/accounts', { name: 'Nómina', type: 'bank', currency: 'DOP' });
+    const job = await owner.ok('POST', '/income-sources', {
+      name: 'Empleo',
+      type: 'formal_employment',
+      defaultCurrency: 'DOP',
+      payDay: 30,
+      scheduleStartDate: '2026-01-01',
+      expectedGross: '80000',
+      accountId: account.id,
+    });
 
-    const empty = await owner.ok('GET', '/budgets/2026-10');
-    expect(empty.budgetId).toBeNull();
-    expect(empty.suggestions).toEqual([
-      { categoryId: housing, scope: 'shared', ownerUserId: null, amount: '30000.00' },
-    ]);
+    const empty = await owner.ok('GET', '/budgets/2026');
+    expect(empty).toMatchObject({ planId: null, lines: [] });
 
-    await owner.ok('PUT', '/budgets/2026-10', {
+    // Suggestions come from fixed expenses and scheduled incomes, month by month.
+    const suggestions = await owner.ok('POST', '/budgets/2026/suggestions');
+    const rent = suggestions.lines.find((l: any) => l.categoryId === housing);
+    expect(rent.amounts).toEqual([...Array(9).fill('0.00'), '30000.00', '30000.00', '30000.00']);
+    const salary = suggestions.lines.find((l: any) => l.incomeSourceId === job.id);
+    expect(salary.amounts.every((a: string) => a === '80000.00')).toBe(true);
+
+    const monthly = (v: string) => Array(12).fill(v);
+    await owner.ok('PUT', '/budgets/2026', {
       currency: 'DOP',
-      items: [
-        { categoryId: housing, scope: 'shared', plannedAmount: '30000' },
-        { categoryId: food, scope: 'shared', plannedAmount: '15000' },
+      lines: [
+        { kind: 'income', incomeSourceId: job.id, amounts: salary.amounts },
+        { kind: 'expense', categoryId: housing, scope: 'shared', amounts: rent.amounts },
+        { kind: 'expense', categoryId: food, scope: 'shared', amounts: monthly('15000') },
       ],
     });
     await owner.ok('POST', '/expenses', { description: 'Super', amount: '4000', currency: 'DOP', date: '2026-10-08', categoryId: food, scope: 'shared' });
-    await runJobs(ctx, owner.me.household.id, '2026-10-31');
+    await owner.ok('POST', '/expenses', { description: 'Cine', amount: '800', currency: 'DOP', date: '2026-10-09', scope: 'shared', categoryId: await categoryId(owner, 'Entretenimiento') });
+    await runJobs(ctx, hid, '2026-10-31');
 
-    const view = await owner.ok('GET', '/budgets/2026-10');
-    const foodItem = view.items.find((i: any) => i.categoryId === food);
-    expect(foodItem).toMatchObject({ actual: '4000.00', remaining: '11000.00' });
-    const housingItem = view.items.find((i: any) => i.categoryId === housing);
-    // Fixed expenses are registered as paid automatically on their due date.
-    expect(housingItem).toMatchObject({ actual: '30000.00', pending: '0.00', remaining: '0.00' });
-    expect(view.totals).toEqual({ planned: '45000.00', actual: '34000.00', pending: '0.00' });
+    const view = await owner.ok('GET', '/budgets/2026');
+    const foodLine = view.lines.find((l: any) => l.categoryId === food);
+    expect(foodLine).toMatchObject({ planTotal: '180000.00', actualTotal: '4000.00', nature: 'variable' });
+    expect(foodLine.actual[9]).toBe('4000.00');
+    const housingLine = view.lines.find((l: any) => l.categoryId === housing);
+    expect(housingLine.actual[9]).toBe('30000.00');
+    expect(view.unbudgeted).toMatchObject([{ name: 'Entretenimiento', actualTotal: '800.00' }]);
+    expect(view.totals.expense.actual[9]).toBe('34800.00');
+    expect(view.totals.income.planTotal).toBe('960000.00');
 
-    const copied = await owner.ok('POST', '/budgets/2026-11/copy-previous');
-    expect(copied.items).toHaveLength(2);
+    // Duplicated lines are rejected.
+    const dup = await owner.put('/budgets/2026', {
+      currency: 'DOP',
+      lines: [
+        { kind: 'expense', categoryId: food, scope: 'shared', amounts: monthly('1') },
+        { kind: 'expense', categoryId: food, scope: 'shared', amounts: monthly('2') },
+      ],
+    });
+    expect(dup.status).toBe(400);
+
+    const copied = await owner.ok('POST', '/budgets/2027/copy-previous', { adjustPct: 10 });
+    expect(copied.lines.find((l: any) => l.categoryId === food).plan[0]).toBe('16500.00');
+    expect((await owner.post('/budgets/2027/copy-previous', {})).status).toBe(409);
   });
 
   it('member balances say who owes whom', async () => {

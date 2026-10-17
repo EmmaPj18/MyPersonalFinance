@@ -37,7 +37,18 @@ export const request = async <T>(method: string, path: string, body?: unknown, q
   return data as T;
 };
 
+/** Sends a file as multipart/form-data. */
+const upload = async <T>(path: string, file: File): Promise<T> => {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`/api${path}`, { method: 'POST', credentials: 'include', body: form });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, data.error ?? 'ERROR', data.message ?? 'Error');
+  return data as T;
+};
+
 export const api = {
+  upload,
   get: <T>(path: string, query?: Query) => request<T>('GET', path, undefined, query),
   post: <T>(path: string, body: unknown = {}, query?: Query) => request<T>('POST', path, body, query),
   put: <T>(path: string, body: unknown, query?: Query) => request<T>('PUT', path, body, query),
