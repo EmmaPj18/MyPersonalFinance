@@ -23,6 +23,9 @@ import {
   CURRENCIES,
   DEBT_TYPES,
   DEDUCTION_CATEGORIES,
+  FX_PREFERRED_SOURCES,
+  FX_SIDES,
+  FX_SOURCES,
   EXPENSE_NATURES,
   EXPENSE_STATUSES,
   INCOME_KINDS,
@@ -51,6 +54,9 @@ export const recurrenceFrequencyEnum = pgEnum('recurrence_frequency', RECURRENCE
 export const debtTypeEnum = pgEnum('debt_type', DEBT_TYPES);
 export const weekendRuleEnum = pgEnum('weekend_rule', WEEKEND_RULES);
 export const budgetLineKindEnum = pgEnum('budget_line_kind', BUDGET_LINE_KINDS);
+export const fxSourceEnum = pgEnum('fx_source', FX_SOURCES);
+export const fxPreferredSourceEnum = pgEnum('fx_preferred_source', FX_PREFERRED_SOURCES);
+export const fxSideEnum = pgEnum('fx_side', FX_SIDES);
 
 const money = (name: string) => numeric(name, { precision: 14, scale: 2 });
 const pct = (name: string) => numeric(name, { precision: 5, scale: 2 });
@@ -77,6 +83,11 @@ export const households = pgTable('households', {
   privacyMode: privacyModeEnum('privacy_mode').notNull().default('open'),
   /** IANA time zone used to decide "today" for scheduled incomes and expenses. */
   timezone: varchar('timezone', { length: 64 }).notNull().default('America/Santo_Domingo'),
+  /** Market rates used for DOP conversions: official (BCRD) or a specific entity via Infodolar. */
+  fxSource: fxPreferredSourceEnum('fx_source').notNull().default('bcrd'),
+  /** Infodolar entity name when fxSource = infodolar (e.g. "Banreservas"). */
+  fxEntity: varchar('fx_entity', { length: 120 }),
+  fxSide: fxSideEnum('fx_side').notNull().default('mid'),
   archivedAt: timestamp('archived_at', { withTimezone: true }),
   createdAt: createdAt(),
 });
@@ -225,6 +236,29 @@ export const exchangeRates = pgTable(
   (t) => [
     primaryKey({ columns: [t.householdId, t.date, t.fromCurrency, t.toCurrency] }),
     check('exchange_rates_positive', sql`${t.rate} > 0`),
+  ],
+);
+
+/**
+ * Exchange rates fetched from public sources, shared by every household.
+ * `entity` is the bank or exchange house for sources that quote several (Infodolar), '' otherwise.
+ */
+export const marketRates = pgTable(
+  'market_rates',
+  {
+    source: fxSourceEnum('source').notNull(),
+    entity: varchar('entity', { length: 120 }).notNull().default(''),
+    date: date('date').notNull(),
+    fromCurrency: currencyEnum('from_currency').notNull(),
+    toCurrency: currencyEnum('to_currency').notNull(),
+    buy: numeric('buy', { precision: 18, scale: 8 }),
+    sell: numeric('sell', { precision: 18, scale: 8 }),
+    mid: numeric('mid', { precision: 18, scale: 8 }).notNull(),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.source, t.entity, t.date, t.fromCurrency, t.toCurrency] }),
+    check('market_rates_positive', sql`${t.mid} > 0`),
   ],
 );
 

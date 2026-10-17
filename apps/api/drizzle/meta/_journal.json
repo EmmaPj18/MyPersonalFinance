@@ -36,6 +36,13 @@
       "when": 1792256089168,
       "tag": "0004_drop_monthly_budget",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792256666179,
+      "tag": "0005_market_rates",
+      "breakpoints": true
     }
   ]
 }

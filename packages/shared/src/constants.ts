@@ -80,5 +80,15 @@ export type WeekendRule = (typeof WEEKEND_RULES)[number];
 export const BUDGET_LINE_KINDS = ['income', 'expense', 'saving'] as const;
 export type BudgetLineKind = (typeof BUDGET_LINE_KINDS)[number];
 
+/** Where market exchange rates come from. */
+export const FX_SOURCES = ['bcrd', 'ecb', 'erapi', 'infodolar'] as const;
+export type FxSource = (typeof FX_SOURCES)[number];
+/** Sources a household can prefer for DOP rates. */
+export const FX_PREFERRED_SOURCES = ['bcrd', 'infodolar'] as const;
+export type FxPreferredSource = (typeof FX_PREFERRED_SOURCES)[number];
+/** Which side of a quote to use: buy (compra), sell (venta) or their average. */
+export const FX_SIDES = ['buy', 'sell', 'mid'] as const;
+export type FxSide = (typeof FX_SIDES)[number];
+
 export const DEBT_TYPES = ['loan', 'credit_card', 'mortgage', 'other'] as const;
 export type DebtType = (typeof DEBT_TYPES)[number];

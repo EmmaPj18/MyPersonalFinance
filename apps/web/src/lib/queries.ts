@@ -17,6 +17,7 @@ import type {
   Invitation,
   LeavePreview,
   Me,
+  MarketRates,
   MemberBalances,
   MonthlyReport,
   RecurringExpense,
@@ -50,6 +51,8 @@ export const useCategories = () => useQuery({ queryKey: ['categories'], queryFn:
 export const useDeductionTypes = () =>
   useQuery({ queryKey: ['deduction-types'], queryFn: () => api.get<DeductionType[]>('/deduction-types') });
 export const useFxRates = () => useQuery({ queryKey: ['fx-rates'], queryFn: () => api.get<FxRate[]>('/fx-rates') });
+export const useMarketRates = () =>
+  useQuery({ queryKey: ['fx-rates', 'market'], queryFn: () => api.get<MarketRates>('/fx-rates/market') });
 
 export const useIncomeSources = () =>
   useQuery({ queryKey: ['income-sources'], queryFn: () => api.get<IncomeSource[]>('/income-sources') });

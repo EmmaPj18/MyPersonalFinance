@@ -65,6 +65,9 @@ export const householdRoutes: FastifyPluginAsyncZod = async (app) => {
 
   app.patch('/household', { preHandler: app.requireOwner, schema: { body: updateHouseholdSchema } }, async (request) => {
     const { householdId } = currentUser(request);
+    if (request.body.fxSource === 'infodolar' && !request.body.fxEntity) {
+      throw badRequest('Elige el banco o casa de cambio de Infodolar');
+    }
     const [household] = await db.update(households).set(request.body).where(eq(households.id, householdId)).returning();
     return household;
   });

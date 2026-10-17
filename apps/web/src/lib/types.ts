@@ -2,6 +2,8 @@ import type {
   AccountStatus,
   AccountType,
   BudgetLineKind,
+  FxPreferredSource,
+  FxSide,
   Currency,
   DebtType,
   DeductionCategory,
@@ -88,6 +90,25 @@ export interface FxRate {
   fromCurrency: Currency;
   toCurrency: Currency;
   rate: string;
+}
+
+export interface MarketQuote {
+  source: 'bcrd' | 'ecb' | 'erapi' | 'infodolar';
+  entity: string;
+  date: string;
+  fromCurrency: Currency;
+  toCurrency: Currency;
+  buy: string | null;
+  sell: string | null;
+  mid: string;
+}
+
+export interface MarketRates {
+  preference: { fxSource: FxPreferredSource; fxEntity: string | null; fxSide: FxSide };
+  today: string;
+  lastFetchedAt: string | null;
+  effective: { USD_DOP: string | null; EUR_DOP: string | null; EUR_USD: string | null };
+  quotes: MarketQuote[];
 }
 
 export interface Split {
