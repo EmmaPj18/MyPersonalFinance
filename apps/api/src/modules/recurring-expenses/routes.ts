@@ -1,74 +1,32 @@
 import {
   idParamsSchema,
-  monthSchema,
+  nextOccurrence,
   reassignInputSchema,
   recurringExpenseInputSchema,
+  upcomingQuerySchema,
   type SplitInput,
 } from '@mypersonalfinance/shared';
 import { and, eq, gte, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { accounts, categories, expenses, recurringExpenses, recurringExpenseSplits } from '../../db/schema';
+import { accounts, categories, expenses, households, recurringExpenses, recurringExpenseSplits } from '../../db/schema';
 import { assertCanEdit, assertInHousehold, assertMembers, resolveOwner, resolveSplits, visibilityFilter } from '../../lib/access';
 import { writeAudit } from '../../lib/audit';
-import { toIsoDate } from '../../lib/dates';
-import { notFound } from '../../lib/errors';
+import { addDays, todayIn, toIsoDate } from '../../lib/dates';
+import { runRecurring } from '../../jobs/recurring';
+import { badRequest, notFound } from '../../lib/errors';
 import { currentUser, type AuthUser } from '../../plugins/auth';
-import type { Database } from '../../db/client';
+import type { Tx } from '../../db/client';
 import { reassignExpense, writeSplits } from '../expenses/service';
-import { occurrencesInMonth } from './occurrences';
-
-/** Creates the pending expenses of every active fixed expense for the month. Idempotent. */
-export const generateMonth = async (db: Database, householdId: string, month: string, actorId: string | null) => {
-  const templates = await db
-    .select()
-    .from(recurringExpenses)
-    .where(and(eq(recurringExpenses.householdId, householdId), eq(recurringExpenses.active, true)));
-  if (templates.length === 0) return { created: 0 };
-  const templateSplits = await db
-    .select()
-    .from(recurringExpenseSplits)
-    .where(inArray(recurringExpenseSplits.recurringExpenseId, templates.map((t) => t.id)));
-
-  let created = 0;
-  await db.transaction(async (tx) => {
-    for (const t of templates) {
-      for (const date of occurrencesInMonth(t, month)) {
-        const [expense] = await tx
-          .insert(expenses)
-          .values({
-            householdId,
-            categoryId: t.categoryId,
-            accountId: t.accountId,
-            amount: t.amount,
-            currency: t.currency,
-            date,
-            description: t.name,
-            nature: 'fixed',
-            scope: t.scope,
-            ownerUserId: t.ownerUserId,
-            recurringExpenseId: t.id,
-            status: 'pending',
-            createdBy: actorId,
-          })
-          .onConflictDoNothing()
-          .returning();
-        if (!expense) continue;
-        created++;
-        if (t.scope === 'shared') {
-          const own = templateSplits
-            .filter((s) => s.recurringExpenseId === t.id)
-            .map((s) => ({ userId: s.userId, sharePct: Number(s.sharePct) }));
-          await writeSplits(tx, expense.id, expense.amount, await resolveSplits(tx, householdId, own.length ? own : undefined));
-        }
-      }
-    }
-  });
-  return { created };
-};
+import { templateSchedule, upcomingDates } from './service';
 
 export const recurringExpenseRoutes: FastifyPluginAsyncZod = async (app) => {
   const { db } = app;
+
+  const householdToday = async (householdId: string) => {
+    const [h] = await db.select({ timezone: households.timezone }).from(households).where(eq(households.id, householdId));
+    return todayIn(h?.timezone ?? 'America/Santo_Domingo');
+  };
 
   const findTemplate = async (user: AuthUser, id: string) => {
     const [row] = await db
@@ -85,7 +43,7 @@ export const recurringExpenseRoutes: FastifyPluginAsyncZod = async (app) => {
     return row;
   };
 
-  const writeTemplateSplits = async (tx: Parameters<Parameters<Database['transaction']>[0]>[0], id: string, splits: SplitInput[]) => {
+  const writeTemplateSplits = async (tx: Tx, id: string, splits: SplitInput[]) => {
     await tx.delete(recurringExpenseSplits).where(eq(recurringExpenseSplits.recurringExpenseId, id));
     if (splits.length) {
       await tx
@@ -113,9 +71,16 @@ export const recurringExpenseRoutes: FastifyPluginAsyncZod = async (app) => {
           .from(recurringExpenseSplits)
           .where(inArray(recurringExpenseSplits.recurringExpenseId, rows.map((r) => r.template.id)))
       : [];
+    const today = await householdToday(user.householdId);
     return rows.map(({ template, categoryName }) => ({
       ...template,
       categoryName,
+      nextDate: template.active
+        ? nextOccurrence(
+            templateSchedule(template),
+            template.generatedThrough && template.generatedThrough > today ? template.generatedThrough : today,
+          )
+        : null,
       splits: splits
         .filter((s) => s.recurringExpenseId === template.id)
         .map(({ userId, sharePct }) => ({ userId, sharePct })),
@@ -123,23 +88,90 @@ export const recurringExpenseRoutes: FastifyPluginAsyncZod = async (app) => {
   });
 
   const save = async (user: AuthUser, body: typeof recurringExpenseInputSchema._output, id?: string) => {
-    const { splits: splitInput, ...input } = body;
+    const { splits: splitInput, linkExpenseId, ...input } = body;
     const ownerUserId = resolveOwner(user, input.scope, input.ownerUserId);
     await assertMembers(db, user.householdId, [ownerUserId]);
     assertCanEdit(user, ownerUserId);
     await assertInHousehold(db, categories, input.categoryId, user.householdId, 'categoría');
     await assertInHousehold(db, accounts, input.accountId, user.householdId, 'cuenta');
+    await assertMembers(db, user.householdId, [input.paidByUserId]);
+    if (input.frequency === 'semimonthly' && !input.secondDueDay) throw badRequest('Indica el segundo día de pago');
+    const linked = linkExpenseId ? await findLinkable(user, linkExpenseId) : null;
     // Explicit split is stored; otherwise occurrences use the members' default split.
     const splits = input.scope === 'shared' && splitInput?.length ? await resolveSplits(db, user.householdId, splitInput) : [];
-    return db.transaction(async (tx) => {
-      const data = { ...input, ownerUserId };
+    const saved = await db.transaction(async (tx) => {
+      const data = { ...input, ownerUserId, paidByUserId: input.paidByUserId ?? ownerUserId ?? user.id };
+      // A new schedule starts at its start date; an expense being converted is its first occurrence.
       const [row] = id
         ? await tx.update(recurringExpenses).set(data).where(eq(recurringExpenses.id, id)).returning()
-        : await tx.insert(recurringExpenses).values({ ...data, householdId: user.householdId }).returning();
+        : await tx
+            .insert(recurringExpenses)
+            .values({
+              ...data,
+              householdId: user.householdId,
+              generatedThrough: linked ? linked.date : addDays(input.startDate, -1),
+            })
+            .returning();
       await writeTemplateSplits(tx, row!.id, splits);
+      if (linked) {
+        await tx.update(expenses).set({ recurringExpenseId: row!.id, nature: 'fixed' }).where(eq(expenses.id, linked.id));
+      }
       return { ...row!, splits };
     });
+    // Register right away any occurrence that's already due.
+    await runRecurring(db, { householdId: user.householdId });
+    return saved;
   };
+
+  const findLinkable = async (user: AuthUser, expenseId: string) => {
+    const [row] = await db
+      .select()
+      .from(expenses)
+      .where(and(eq(expenses.id, expenseId), eq(expenses.householdId, user.householdId)));
+    if (!row) throw notFound('Gasto no encontrado');
+    if (row.recurringExpenseId) throw badRequest('Ese gasto ya pertenece a un gasto fijo');
+    assertCanEdit(user, row.ownerUserId);
+    return row;
+  };
+
+  /** Occurrences still to come (projections, not stored). */
+  app.get(
+    '/recurring-expenses/upcoming',
+    { preHandler: app.authenticate, schema: { querystring: upcomingQuerySchema } },
+    async (request) => {
+      const user = currentUser(request);
+      const today = await householdToday(user.householdId);
+      const until = addDays(today, request.query.days);
+      const rows = await db
+        .select({ template: recurringExpenses, categoryName: categories.name, categoryColor: categories.color })
+        .from(recurringExpenses)
+        .leftJoin(categories, eq(categories.id, recurringExpenses.categoryId))
+        .where(
+          and(
+            eq(recurringExpenses.householdId, user.householdId),
+            eq(recurringExpenses.active, true),
+            visibilityFilter(user, recurringExpenses.ownerUserId, recurringExpenses.scope),
+          ),
+        );
+      return rows
+        .flatMap(({ template: t, categoryName, categoryColor }) =>
+          upcomingDates(templateSchedule(t), t.generatedThrough, today, until).map((date) => ({
+            recurringExpenseId: t.id,
+            name: t.name,
+            date,
+            amount: t.amount,
+            currency: t.currency,
+            scope: t.scope,
+            ownerUserId: t.ownerUserId,
+            categoryName,
+            categoryColor,
+            isVariableAmount: t.isVariableAmount,
+            autoPay: t.autoPay,
+          })),
+        )
+        .sort((a, b) => (a.date < b.date ? -1 : 1));
+    },
+  );
 
   app.post(
     '/recurring-expenses',
@@ -173,15 +205,6 @@ export const recurringExpenseRoutes: FastifyPluginAsyncZod = async (app) => {
         await tx.delete(recurringExpenses).where(eq(recurringExpenses.id, existing.id));
       });
       return reply.status(204).send();
-    },
-  );
-
-  app.post(
-    '/recurring-expenses/generate',
-    { preHandler: app.requireWriter, schema: { querystring: z.object({ month: monthSchema }) } },
-    async (request) => {
-      const user = currentUser(request);
-      return generateMonth(db, user.householdId, request.query.month, user.id);
     },
   );
 

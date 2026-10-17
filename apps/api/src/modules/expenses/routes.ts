@@ -137,7 +137,7 @@ export const expenseRoutes: FastifyPluginAsyncZod = async (app) => {
       return db.transaction(async (tx) => {
         const [expense] = await tx
           .update(expenses)
-          .set({ ...input, ownerUserId, paidByUserId: input.paidByUserId ?? existing.paidByUserId })
+          .set({ ...input, ownerUserId, paidByUserId: input.paidByUserId ?? existing.paidByUserId, isEstimated: false })
           .where(eq(expenses.id, existing.id))
           .returning();
         const rows = await writeSplits(tx, expense!.id, expense!.amount, splits);
@@ -194,6 +194,7 @@ export const expenseRoutes: FastifyPluginAsyncZod = async (app) => {
           .update(expenses)
           .set({
             status: 'paid',
+            isEstimated: false,
             amount: amount ?? existing.amount,
             date: date ?? existing.date,
             accountId: accountId === undefined ? existing.accountId : accountId,

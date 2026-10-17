@@ -9,7 +9,8 @@ import { monthRange, previousMonth } from '../../lib/dates';
 import { badRequest, notFound } from '../../lib/errors';
 import { FxResolver } from '../../lib/fx';
 import { currentUser, type AuthUser } from '../../plugins/auth';
-import { occurrencesInMonth } from '../recurring-expenses/occurrences';
+import { occurrencesInMonth } from '@mypersonalfinance/shared';
+import { templateSchedule } from '../recurring-expenses/service';
 import { loadExpenses } from '../reports/data';
 
 const monthParams = z.object({ month: monthSchema });
@@ -98,7 +99,7 @@ export const budgetRoutes: FastifyPluginAsyncZod = async (app) => {
     const suggestions = new Map<string, { categoryId: string; scope: Scope; ownerUserId: string | null; amount: Decimal }>();
     for (const t of templates) {
       if (!t.categoryId || !canSee(user, t.ownerUserId)) continue;
-      const n = occurrencesInMonth(t, month).length;
+      const n = occurrencesInMonth(templateSchedule(t), month).length;
       const value = n ? fx.convert(new Decimal(t.amount).times(n), t.currency, currency, from) : null;
       if (!value) continue;
       const key = keyOf(t);

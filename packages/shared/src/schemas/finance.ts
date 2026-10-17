@@ -9,6 +9,7 @@ import {
   INCOME_SOURCE_TYPES,
   PAY_FREQUENCIES,
   RECURRENCE_FREQUENCIES,
+  WEEKEND_RULES,
 } from '../constants';
 import {
   currencySchema,
@@ -22,6 +23,7 @@ import {
 
 const optionalId = uuidSchema.nullable().optional();
 const nameField = z.string().trim().min(1).max(120);
+const dayOfMonthSchema = z.coerce.number().int().min(1).max(31);
 
 // ---------------------------------------------------------------- catalogs
 
@@ -80,6 +82,14 @@ export const incomeSourceInputSchema = z.object({
   deductionTemplates: z
     .array(z.object({ deductionTypeId: uuidSchema, defaultAmount: moneySchema }))
     .optional(),
+  // Pay schedule
+  payDay: dayOfMonthSchema.nullable().optional(),
+  secondPayDay: dayOfMonthSchema.nullable().optional(),
+  scheduleStartDate: isoDateSchema.nullable().optional(),
+  weekendRule: z.enum(WEEKEND_RULES).default('none'),
+  expectedGross: moneySchema.nullable().optional(),
+  /** Register each payment automatically on its pay day (needs schedule, expected gross and account). */
+  autoRegister: z.boolean().default(false),
 });
 export type IncomeSourceInput = z.input<typeof incomeSourceInputSchema>;
 
@@ -172,11 +182,19 @@ export const recurringExpenseInputSchema = z.object({
   ownerUserId: optionalId,
   splits: splitsField,
   frequency: z.enum(RECURRENCE_FREQUENCIES).default('monthly'),
-  dueDay: z.coerce.number().int().min(1).max(31).default(1),
+  dueDay: dayOfMonthSchema.default(1),
+  secondDueDay: dayOfMonthSchema.nullable().optional(),
+  weekendRule: z.enum(WEEKEND_RULES).default('none'),
   startDate: isoDateSchema,
   endDate: isoDateSchema.nullable().optional(),
   isVariableAmount: z.boolean().default(false),
   active: z.boolean().default(true),
+  /** Register as paid on the due date (otherwise it's created pending). */
+  autoPay: z.boolean().default(true),
+  /** Who usually pays it; defaults to the current user. */
+  paidByUserId: optionalId,
+  /** Existing expense that becomes the first occurrence ("convert to fixed"). */
+  linkExpenseId: optionalId,
 });
 export type RecurringExpenseInput = z.input<typeof recurringExpenseInputSchema>;
 
@@ -239,6 +257,8 @@ export const debtPaymentInputSchema = z.object({
 });
 
 // ---------------------------------------------------------------- reports
+
+export const upcomingQuerySchema = z.object({ days: z.coerce.number().int().min(1).max(400).default(30) });
 
 export const reportQuerySchema = z.object({
   month: monthSchema,

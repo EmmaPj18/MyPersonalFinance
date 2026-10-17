@@ -1,4 +1,13 @@
-import { EXPENSE_NATURES, RECURRENCE_FREQUENCIES, type Currency, type ExpenseNature, type RecurrenceFrequency } from '@mypersonalfinance/shared';
+import {
+  EXPENSE_NATURES,
+  occurrencesBetween,
+  RECURRENCE_FREQUENCIES,
+  WEEKEND_RULES,
+  type Currency,
+  type ExpenseNature,
+  type RecurrenceFrequency,
+  type WeekendRule,
+} from '@mypersonalfinance/shared';
 import { useState, type FormEvent, type ReactNode } from 'react';
 import {
   AccountSelect,
@@ -14,7 +23,7 @@ import {
 } from '../../components/finance';
 import { Button, Checkbox, ErrorBanner, Field, Input, MoneyInput, Segmented, Select } from '../../components/ui';
 import { usePrefs } from '../../context/prefs';
-import { formatDate, RECURRENCE_LABELS, today } from '../../lib/format';
+import { formatDate, formatShortDate, RECURRENCE_LABELS, today, WEEKEND_RULE_LABELS } from '../../lib/format';
 import { useCategories, useExpenseHistory } from '../../lib/queries';
 import type { Expense, RecurringExpense } from '../../lib/types';
 
@@ -63,15 +72,130 @@ const MemberSelect = ({ id, value, onChange }: { id?: string; value: string; onC
   );
 };
 
+export interface ScheduleState {
+  frequency: RecurrenceFrequency;
+  dueDay: string;
+  secondDueDay: string;
+  startDate: string;
+  endDate: string;
+  weekendRule: WeekendRule;
+}
+
+const scheduleDays = (s: ScheduleState) =>
+  s.frequency === 'semimonthly' ? [Number(s.dueDay), Number(s.secondDueDay)].sort((a, b) => a - b) : [Number(s.dueDay)];
+
+export const schedulePayload = (s: ScheduleState) => {
+  const [day, second] = scheduleDays(s);
+  return {
+    frequency: s.frequency,
+    dueDay: day,
+    secondDueDay: s.frequency === 'semimonthly' ? second : null,
+    startDate: s.startDate,
+    endDate: s.endDate || null,
+    weekendRule: s.weekendRule,
+  };
+};
+
+/** Next few dates of a schedule, for a live preview. */
+const schedulePreview = (s: ScheduleState) => {
+  const days = scheduleDays(s);
+  if (!s.startDate || days.some((d) => !(d >= 1 && d <= 31))) return [];
+  const from = today() > s.startDate ? today() : s.startDate;
+  return occurrencesBetween(
+    { frequency: s.frequency, day: days[0]!, secondDay: days[1], startDate: s.startDate, endDate: s.endDate || null, weekendRule: s.weekendRule },
+    from,
+    `${Number(from.slice(0, 4)) + 2}-12-31`,
+  ).slice(0, 4);
+};
+
+/** Frequency, day(s), dates and weekend rule. `fixedStart` hides the start date (taken from the expense date). */
+export const ScheduleFields = ({
+  value,
+  onChange,
+  fixedStart,
+}: {
+  value: ScheduleState;
+  onChange: (v: ScheduleState) => void;
+  fixedStart?: boolean;
+}) => {
+  const set = (patch: Partial<ScheduleState>) => onChange({ ...value, ...patch });
+  const stepsFromStart = value.frequency === 'weekly' || value.frequency === 'biweekly';
+  const preview = schedulePreview(value);
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Frecuencia">
+          {(id) => (
+            <Select
+              id={id}
+              value={value.frequency}
+              onChange={(e) => {
+                const frequency = e.target.value as RecurrenceFrequency;
+                set(frequency === 'semimonthly' && !value.secondDueDay ? { frequency, dueDay: '15', secondDueDay: '30' } : { frequency });
+              }}
+            >
+              {RECURRENCE_FREQUENCIES.map((f) => (
+                <option key={f} value={f}>
+                  {RECURRENCE_LABELS[f]}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+        {!stepsFromStart && !fixedStart && (
+          <div className={value.frequency === 'semimonthly' ? 'grid grid-cols-2 gap-4' : ''}>
+            <Field label={value.frequency === 'semimonthly' ? 'Primer día' : 'Día de pago'} hint="30 o 31 = último día">
+              {(id) => <Input id={id} type="number" min={1} max={31} required value={value.dueDay} onChange={(e) => set({ dueDay: e.target.value })} />}
+            </Field>
+            {value.frequency === 'semimonthly' && (
+              <Field label="Segundo día">
+                {(id) => (
+                  <Input id={id} type="number" min={1} max={31} required value={value.secondDueDay} onChange={(e) => set({ secondDueDay: e.target.value })} />
+                )}
+              </Field>
+            )}
+          </div>
+        )}
+        {fixedStart && value.frequency === 'semimonthly' && (
+          <Field label="Segundo día del mes">
+            {(id) => <Input id={id} type="number" min={1} max={31} required value={value.secondDueDay} onChange={(e) => set({ secondDueDay: e.target.value })} />}
+          </Field>
+        )}
+        {!fixedStart && (
+          <Field label={stepsFromStart ? 'Fecha del primer pago' : 'Desde'}>
+            {(id) => <Input id={id} type="date" required value={value.startDate} onChange={(e) => set({ startDate: e.target.value })} />}
+          </Field>
+        )}
+        <Field label="Hasta (opcional)">{(id) => <Input id={id} type="date" value={value.endDate} onChange={(e) => set({ endDate: e.target.value })} />}</Field>
+        <Field label="Si cae en fin de semana">
+          {(id) => (
+            <Select id={id} value={value.weekendRule} onChange={(e) => set({ weekendRule: e.target.value as WeekendRule })}>
+              {WEEKEND_RULES.map((r) => (
+                <option key={r} value={r}>
+                  {WEEKEND_RULE_LABELS[r]}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+      </div>
+      {preview.length > 0 && <p className="text-xs text-muted">Próximas fechas: {preview.map(formatShortDate).join(' · ')}</p>}
+    </div>
+  );
+};
+
 export const ExpenseForm = ({
   initial,
   defaultNature = 'variable',
   onSubmit,
+  onSubmitRecurring,
   onCancel,
 }: {
   initial?: Expense;
   defaultNature?: ExpenseNature;
   onSubmit: (payload: unknown) => Promise<unknown>;
+  /** Called instead of onSubmit when the user marks a new expense as repeating. */
+  onSubmitRecurring?: (payload: unknown) => Promise<unknown>;
   onCancel: () => void;
 }) => {
   const { me } = usePrefs();
@@ -89,7 +213,20 @@ export const ExpenseForm = ({
   const [paidBy, setPaidBy] = useState(initial?.paidByUserId ?? me.id);
   const [accountId, setAccountId] = useState<string | null>(initial?.accountId ?? null);
   const [pending, setPending] = useState(initial?.status === 'pending');
-  const { error, saving, run } = useSubmit(onSubmit);
+  const [repeat, setRepeat] = useState(!initial && defaultNature === 'fixed');
+  const [schedule, setSchedule] = useState<ScheduleState>({
+    frequency: 'monthly',
+    dueDay: '1',
+    secondDueDay: '',
+    startDate: '',
+    endDate: '',
+    weekendRule: 'none',
+  });
+  const [variableAmount, setVariableAmount] = useState(false);
+  const [autoPay, setAutoPay] = useState(true);
+  const { error, saving, run } = useSubmit(repeat && onSubmitRecurring ? onSubmitRecurring : onSubmit);
+  // A repeating expense starts on the expense date, which also gives its day of the month.
+  const effectiveSchedule: ScheduleState = { ...schedule, startDate: date, dueDay: String(Number(date.slice(8, 10)) || 1) };
 
   const changeCategory = (id: string | null) => {
     setCategoryId(id);
@@ -100,6 +237,23 @@ export const ExpenseForm = ({
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (splitInvalid(owner, split)) return;
+    if (repeat && onSubmitRecurring) {
+      void run({
+        name: description,
+        amount,
+        currency,
+        categoryId,
+        accountId,
+        scope: owner.scope,
+        ownerUserId: owner.ownerUserId,
+        splits: owner.scope === 'shared' ? splitsPayload(split) : undefined,
+        paidByUserId: paidBy,
+        isVariableAmount: variableAmount,
+        autoPay,
+        ...schedulePayload(effectiveSchedule),
+      });
+      return;
+    }
     void run({
       description,
       amount,
@@ -141,8 +295,25 @@ export const ExpenseForm = ({
         <Field label="Cuenta / medio de pago">{(id) => <AccountSelect id={id} value={accountId} onChange={setAccountId} />}</Field>
       </div>
       {owner.scope === 'shared' && <SplitEditor value={split} onChange={setSplit} amount={amount} currency={currency} />}
-      <Checkbox label="Pendiente de pago" checked={pending} onChange={(e) => setPending(e.target.checked)} />
-      <FormActions saving={saving} disabled={splitInvalid(owner, split)} onCancel={onCancel} />
+      {!initial && onSubmitRecurring && (
+        <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
+          <Checkbox label="Se repite (gasto fijo)" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} />
+          {repeat && (
+            <>
+              <p className="text-xs text-muted">
+                Se registrará automáticamente en cada fecha a partir del {date ? formatShortDate(date) : '…'} (incluida).
+              </p>
+              <ScheduleFields value={effectiveSchedule} onChange={setSchedule} fixedStart />
+              <div className="flex flex-wrap gap-4">
+                <Checkbox label="Registrar como pagado automáticamente" checked={autoPay} onChange={(e) => setAutoPay(e.target.checked)} />
+                <Checkbox label="El monto varía (se usa como estimado)" checked={variableAmount} onChange={(e) => setVariableAmount(e.target.checked)} />
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      {!repeat && <Checkbox label="Pendiente de pago" checked={pending} onChange={(e) => setPending(e.target.checked)} />}
+      <FormActions saving={saving} disabled={splitInvalid(owner, split)} onCancel={onCancel} label={repeat ? 'Crear gasto fijo' : 'Guardar'} />
     </form>
   );
 };
@@ -240,28 +411,36 @@ export const ReassignForm = ({
 
 export const RecurringForm = ({
   initial,
+  fromExpense,
   onSubmit,
   onCancel,
 }: {
   initial?: RecurringExpense;
+  /** Existing expense being converted into a fixed one (becomes its first occurrence). */
+  fromExpense?: Expense;
   onSubmit: (payload: unknown) => Promise<unknown>;
   onCancel: () => void;
 }) => {
   const { me } = usePrefs();
-  const [name, setName] = useState(initial?.name ?? '');
-  const [amount, setAmount] = useState(initial?.amount ?? '');
-  const [currency, setCurrency] = useState<Currency>(initial?.currency ?? me.defaultCurrency);
-  const [categoryId, setCategoryId] = useState<string | null>(initial?.categoryId ?? null);
-  const [accountId, setAccountId] = useState<string | null>(initial?.accountId ?? null);
-  const [owner, setOwner] = useState<Ownership>(
-    initial ? { scope: initial.scope, ownerUserId: initial.ownerUserId } : { scope: 'shared', ownerUserId: null },
-  );
-  const [split, setSplit] = useState<SplitState>(splitStateFrom(initial?.splits));
-  const [frequency, setFrequency] = useState<RecurrenceFrequency>(initial?.frequency ?? 'monthly');
-  const [dueDay, setDueDay] = useState(String(initial?.dueDay ?? 1));
-  const [startDate, setStartDate] = useState(initial?.startDate ?? `${today().slice(0, 7)}-01`);
-  const [endDate, setEndDate] = useState(initial?.endDate ?? '');
+  const base = initial ?? fromExpense;
+  const [name, setName] = useState(initial?.name ?? fromExpense?.description ?? '');
+  const [amount, setAmount] = useState(base?.amount ?? '');
+  const [currency, setCurrency] = useState<Currency>(base?.currency ?? me.defaultCurrency);
+  const [categoryId, setCategoryId] = useState<string | null>(base?.categoryId ?? null);
+  const [accountId, setAccountId] = useState<string | null>(base?.accountId ?? null);
+  const [owner, setOwner] = useState<Ownership>(base ? { scope: base.scope, ownerUserId: base.ownerUserId } : { scope: 'shared', ownerUserId: null });
+  const [split, setSplit] = useState<SplitState>(splitStateFrom(base?.splits));
+  const [paidBy, setPaidBy] = useState(initial?.paidByUserId ?? fromExpense?.paidByUserId ?? me.id);
+  const [schedule, setSchedule] = useState<ScheduleState>({
+    frequency: initial?.frequency ?? 'monthly',
+    dueDay: String(initial?.dueDay ?? (fromExpense ? Number(fromExpense.date.slice(8, 10)) : 1)),
+    secondDueDay: initial?.secondDueDay ? String(initial.secondDueDay) : '',
+    startDate: initial?.startDate ?? fromExpense?.date ?? today(),
+    endDate: initial?.endDate ?? '',
+    weekendRule: initial?.weekendRule ?? 'none',
+  });
   const [variable, setVariable] = useState(initial?.isVariableAmount ?? false);
+  const [autoPay, setAutoPay] = useState(initial?.autoPay ?? true);
   const [active, setActive] = useState(initial?.active ?? true);
   const { error, saving, run } = useSubmit(onSubmit);
 
@@ -279,18 +458,21 @@ export const RecurringForm = ({
           scope: owner.scope,
           ownerUserId: owner.ownerUserId,
           splits: owner.scope === 'shared' ? splitsPayload(split) : undefined,
-          frequency,
-          dueDay: Number(dueDay),
-          startDate,
-          endDate: endDate || null,
+          paidByUserId: paidBy,
           isVariableAmount: variable,
+          autoPay,
           active,
+          linkExpenseId: fromExpense?.id,
+          ...schedulePayload(schedule),
         });
       }}
       className="flex flex-col gap-4"
       aria-label="Gasto fijo"
     >
       <ErrorBanner error={error} />
+      {fromExpense && (
+        <p className="text-sm text-muted">El gasto del {formatDate(fromExpense.date)} quedará como el primer pago de este gasto fijo.</p>
+      )}
       <Field label="Nombre">{(id) => <Input id={id} required placeholder="Ej. Alquiler, Internet, Colegio" value={name} onChange={(e) => setName(e.target.value)} />}</Field>
       <div className="grid grid-cols-[1fr_7rem] gap-4">
         <Field label={variable ? 'Monto estimado' : 'Monto'}>{(id) => <MoneyInput id={id} required value={amount} onChange={(e) => setAmount(e.target.value)} />}</Field>
@@ -299,31 +481,20 @@ export const RecurringForm = ({
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Categoría">{(id) => <CategorySelect id={id} value={categoryId} onChange={setCategoryId} />}</Field>
         <Field label="De quién es">{(id) => <OwnerSelect id={id} value={owner} onChange={setOwner} />}</Field>
-        <Field label="Frecuencia">
-          {(id) => (
-            <Select id={id} value={frequency} onChange={(e) => setFrequency(e.target.value as RecurrenceFrequency)}>
-              {RECURRENCE_FREQUENCIES.map((f) => (
-                <option key={f} value={f}>
-                  {RECURRENCE_LABELS[f]}
-                </option>
-              ))}
-            </Select>
-          )}
-        </Field>
-        <Field label="Día de vencimiento" hint={frequency === 'weekly' || frequency === 'biweekly' ? 'Se cuenta desde la fecha de inicio.' : undefined}>
-          {(id) => <Input id={id} type="number" min={1} max={31} required value={dueDay} onChange={(e) => setDueDay(e.target.value)} />}
-        </Field>
-        <Field label="Desde">{(id) => <Input id={id} type="date" required value={startDate} onChange={(e) => setStartDate(e.target.value)} />}</Field>
-        <Field label="Hasta (opcional)">{(id) => <Input id={id} type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />}</Field>
-        <Field label="Cuenta" className="sm:col-span-2">
-          {(id) => <AccountSelect id={id} value={accountId} onChange={setAccountId} />}
-        </Field>
+        <Field label="Lo paga">{(id) => <MemberSelect id={id} value={paidBy} onChange={setPaidBy} />}</Field>
+        <Field label="Cuenta / medio de pago">{(id) => <AccountSelect id={id} value={accountId} onChange={setAccountId} />}</Field>
       </div>
+      <fieldset className="rounded-lg border border-border p-3">
+        <legend className="px-1 text-sm font-medium">Cuándo se paga</legend>
+        <ScheduleFields value={schedule} onChange={setSchedule} />
+      </fieldset>
       {owner.scope === 'shared' && <SplitEditor value={split} onChange={setSplit} amount={amount} currency={currency} />}
       <div className="flex flex-wrap gap-4">
+        <Checkbox label="Registrar como pagado automáticamente" checked={autoPay} onChange={(e) => setAutoPay(e.target.checked)} />
         <Checkbox label="El monto varía cada mes" checked={variable} onChange={(e) => setVariable(e.target.checked)} />
         <Checkbox label="Activo" checked={active} onChange={(e) => setActive(e.target.checked)} />
       </div>
+      {!autoPay && <p className="text-xs text-muted">Se creará como pendiente en cada fecha y lo marcarás pagado manualmente.</p>}
       <FormActions saving={saving} disabled={splitInvalid(owner, split)} onCancel={onCancel} />
     </form>
   );

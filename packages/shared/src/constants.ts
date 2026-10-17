@@ -65,8 +65,12 @@ export type DeductionCategory = (typeof DEDUCTION_CATEGORIES)[number];
 export const ACCOUNT_TYPES = ['bank', 'cash', 'credit_card', 'savings', 'investment'] as const;
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
 
-export const RECURRENCE_FREQUENCIES = ['weekly', 'biweekly', 'monthly', 'yearly'] as const;
+export const RECURRENCE_FREQUENCIES = ['weekly', 'biweekly', 'semimonthly', 'monthly', 'quarterly', 'yearly'] as const;
 export type RecurrenceFrequency = (typeof RECURRENCE_FREQUENCIES)[number];
+
+/** What to do when a scheduled date falls on a weekend. */
+export const WEEKEND_RULES = ['none', 'previous', 'next'] as const;
+export type WeekendRule = (typeof WEEKEND_RULES)[number];
 
 export const DEBT_TYPES = ['loan', 'credit_card', 'mortgage', 'other'] as const;
 export type DebtType = (typeof DEBT_TYPES)[number];

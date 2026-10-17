@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { categoryId, createCouple, registerUser, setupApp } from './helpers';
+import { categoryId, createCouple, registerUser, runJobs, setupApp } from './helpers';
 
 const ctx = setupApp();
 
@@ -55,7 +55,7 @@ describe('reports, FX and budgets', () => {
       currency: 'DOP',
       scope: 'shared',
       dueDay: 1,
-      startDate: '2026-01-01',
+      startDate: '2026-10-01',
     });
 
     const empty = await owner.ok('GET', '/budgets/2026-10');
@@ -72,14 +72,15 @@ describe('reports, FX and budgets', () => {
       ],
     });
     await owner.ok('POST', '/expenses', { description: 'Super', amount: '4000', currency: 'DOP', date: '2026-10-08', categoryId: food, scope: 'shared' });
-    await owner.ok('POST', '/recurring-expenses/generate?month=2026-10');
+    await runJobs(ctx, owner.me.household.id, '2026-10-31');
 
     const view = await owner.ok('GET', '/budgets/2026-10');
     const foodItem = view.items.find((i: any) => i.categoryId === food);
     expect(foodItem).toMatchObject({ actual: '4000.00', remaining: '11000.00' });
     const housingItem = view.items.find((i: any) => i.categoryId === housing);
-    expect(housingItem).toMatchObject({ actual: '0.00', pending: '30000.00', remaining: '0.00' });
-    expect(view.totals).toEqual({ planned: '45000.00', actual: '4000.00', pending: '30000.00' });
+    // Fixed expenses are registered as paid automatically on their due date.
+    expect(housingItem).toMatchObject({ actual: '30000.00', pending: '0.00', remaining: '0.00' });
+    expect(view.totals).toEqual({ planned: '45000.00', actual: '34000.00', pending: '0.00' });
 
     const copied = await owner.ok('POST', '/budgets/2026-11/copy-previous');
     expect(copied.items).toHaveLength(2);

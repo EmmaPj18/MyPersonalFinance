@@ -19,3 +19,7 @@ export const previousMonth = (month: string) => {
   const [y, m] = month.split('-').map(Number) as [number, number];
   return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
 };
+
+/** Today's date ("YYYY-MM-DD") in the given IANA time zone. */
+export const todayIn = (timeZone: string, now = new Date()) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);

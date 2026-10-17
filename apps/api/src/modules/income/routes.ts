@@ -5,6 +5,9 @@ import {
   incomeEntryInputSchema,
   incomeSourceInputSchema,
   isNegative,
+  nextOccurrence,
+  occurrencesBetween,
+  upcomingQuerySchema,
 } from '@mypersonalfinance/shared';
 import { and, desc, eq, gte, inArray, lte, type SQL } from 'drizzle-orm';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
@@ -12,6 +15,7 @@ import type { DbOrTx } from '../../db/client';
 import {
   accounts,
   deductionTypes,
+  households,
   incomeDeductions,
   incomeEntries,
   incomeSources,
@@ -20,7 +24,9 @@ import {
 } from '../../db/schema';
 import { assertCanEdit, assertInHousehold, assertMembers, resolveOwner, resolveSplits, visibilityFilter } from '../../lib/access';
 import { badRequest, notFound } from '../../lib/errors';
-import { monthRange } from '../../lib/dates';
+import { addDays, monthRange, todayIn } from '../../lib/dates';
+import { runRecurring } from '../../jobs/recurring';
+import { sourceSchedule, writeEntryChildren } from './service';
 import type { AuthUser } from '../../plugins/auth';
 import { currentUser } from '../../plugins/auth';
 
@@ -36,6 +42,11 @@ const assertDeductionTypes = async (db: DbOrTx, householdId: string, ids: string
 
 export const incomeRoutes: FastifyPluginAsyncZod = async (app) => {
   const { db } = app;
+
+  const householdToday = async (householdId: string) => {
+    const [h] = await db.select({ timezone: households.timezone }).from(households).where(eq(households.id, householdId));
+    return todayIn(h?.timezone ?? 'America/Santo_Domingo');
+  };
 
   const findSource = async (user: AuthUser, id: string) => {
     const [row] = await db
@@ -72,8 +83,13 @@ export const incomeRoutes: FastifyPluginAsyncZod = async (app) => {
           .from(sourceDeductionTemplates)
           .where(inArray(sourceDeductionTemplates.sourceId, sources.map((s) => s.id)))
       : [];
+    const today = await householdToday(user.householdId);
     return sources.map((s) => ({
       ...s,
+      nextPayDate: (() => {
+        const rule = sourceSchedule(s);
+        return rule ? nextOccurrence(rule, addDays(today, -1)) : null;
+      })(),
       deductionTemplates: templates
         .filter((t) => t.sourceId === s.id)
         .map(({ deductionTypeId, defaultAmount }) => ({ deductionTypeId, defaultAmount })),
@@ -88,9 +104,24 @@ export const incomeRoutes: FastifyPluginAsyncZod = async (app) => {
     const templates = input.deductionTemplates;
     if (templates) await assertDeductionTypes(db, user.householdId, templates.map((t) => t.deductionTypeId));
     const { deductionTemplates: _ignored, ...values } = input;
+    if (input.autoRegister) {
+      if (input.payFrequency === 'irregular') throw badRequest('Una fuente irregular no puede registrarse automáticamente');
+      if (!input.scheduleStartDate) throw badRequest('Indica desde cuándo se registran los pagos');
+      if (!['weekly', 'biweekly'].includes(input.payFrequency) && !input.payDay) throw badRequest('Indica el día de pago');
+      if (!input.expectedGross) throw badRequest('Indica el monto bruto esperado');
+      if (!input.accountId) throw badRequest('Indica la cuenta donde se recibe el pago');
+    }
+    const previous = id ? (await db.select().from(incomeSources).where(eq(incomeSources.id, id)))[0] : undefined;
+    // Turning automatic registration on (again) starts from the schedule's start date.
+    const restart = input.autoRegister && (!previous?.autoRegister || previous.scheduleStartDate !== input.scheduleStartDate);
 
-    return db.transaction(async (tx) => {
-      const data = { ...values, ownerUserId, accountId: input.accountId ?? null };
+    const saved = await db.transaction(async (tx) => {
+      const data = {
+        ...values,
+        ownerUserId,
+        accountId: input.accountId ?? null,
+        ...(restart ? { generatedThrough: input.scheduleStartDate ? addDays(input.scheduleStartDate, -1) : null } : {}),
+      };
       const [source] = id
         ? await tx.update(incomeSources).set(data).where(eq(incomeSources.id, id)).returning()
         : await tx.insert(incomeSources).values({ ...data, householdId: user.householdId }).returning();
@@ -104,7 +135,49 @@ export const incomeRoutes: FastifyPluginAsyncZod = async (app) => {
       }
       return source!;
     });
+    // Register right away any payment that's already due.
+    if (saved.autoRegister) await runRecurring(db, { householdId: user.householdId });
+    return saved;
   };
+
+  /** Scheduled payments still to come (projections, not stored). */
+  app.get('/income-sources/upcoming', { preHandler: app.authenticate, schema: { querystring: upcomingQuerySchema } }, async (request) => {
+    const user = currentUser(request);
+    const today = await householdToday(user.householdId);
+    const until = addDays(today, request.query.days);
+    const sources = await db
+      .select()
+      .from(incomeSources)
+      .where(
+        and(
+          eq(incomeSources.householdId, user.householdId),
+          eq(incomeSources.isActive, true),
+          visibilityFilter(user, incomeSources.ownerUserId, incomeSources.scope),
+        ),
+      );
+    const templates = sources.length
+      ? await db.select().from(sourceDeductionTemplates).where(inArray(sourceDeductionTemplates.sourceId, sources.map((s) => s.id)))
+      : [];
+    return sources
+      .flatMap((s) => {
+        const rule = sourceSchedule(s);
+        if (!rule) return [];
+        const from = addDays(s.generatedThrough && s.generatedThrough > today ? s.generatedThrough : today, s.autoRegister ? 1 : 0);
+        const deductions = templates.filter((t) => t.sourceId === s.id).map((t) => t.defaultAmount);
+        return occurrencesBetween(rule, from, until).map((date) => ({
+          sourceId: s.id,
+          sourceName: s.name,
+          scope: s.scope,
+          ownerUserId: s.ownerUserId,
+          date,
+          currency: s.defaultCurrency,
+          expectedGross: s.expectedGross,
+          expectedNet: s.expectedGross ? computeNet(s.expectedGross, deductions) : null,
+          autoRegister: s.autoRegister,
+        }));
+      })
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+  });
 
   app.post(
     '/income-sources',
@@ -204,23 +277,15 @@ export const incomeRoutes: FastifyPluginAsyncZod = async (app) => {
 
     return db.transaction(async (tx) => {
       const { deductions, splits: _s, ...values } = input;
-      const data = { ...values, netAmount, accountId: input.accountId ?? source.accountId ?? null };
+      // Saving an entry confirms its amounts (scheduled entries start as estimates).
+      const data = { ...values, netAmount, accountId: input.accountId ?? source.accountId ?? null, isEstimated: false };
       const [entry] = id
         ? await tx.update(incomeEntries).set(data).where(eq(incomeEntries.id, id)).returning()
         : await tx
             .insert(incomeEntries)
             .values({ ...data, householdId: user.householdId, createdBy: user.id })
             .returning();
-      await tx.delete(incomeDeductions).where(eq(incomeDeductions.incomeEntryId, entry!.id));
-      await tx.delete(incomeSplits).where(eq(incomeSplits.incomeEntryId, entry!.id));
-      if (deductions.length) {
-        await tx.insert(incomeDeductions).values(deductions.map((d) => ({ incomeEntryId: entry!.id, ...d })));
-      }
-      if (splits.length) {
-        await tx
-          .insert(incomeSplits)
-          .values(splits.map((s) => ({ incomeEntryId: entry!.id, userId: s.userId, sharePct: String(s.sharePct) })));
-      }
+      await writeEntryChildren(tx, entry!.id, deductions, splits);
       return { ...entry!, deductions, splits };
     });
   };

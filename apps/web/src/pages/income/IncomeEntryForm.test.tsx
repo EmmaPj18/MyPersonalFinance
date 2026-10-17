@@ -32,6 +32,13 @@ const job: IncomeSource = {
   accountId: null,
   isActive: true,
   deductionTemplates: [{ deductionTypeId: 'afp', defaultAmount: '2439.50' }],
+  payDay: 30,
+  secondPayDay: null,
+  scheduleStartDate: '2026-01-01',
+  weekendRule: 'none',
+  expectedGross: null,
+  autoRegister: false,
+  nextPayDate: null,
 };
 
 const renderForm = (onSubmit = vi.fn().mockResolvedValue(undefined), defaultKind?: 'bonus') => {

@@ -20,6 +20,8 @@ import type {
   MemberBalances,
   MonthlyReport,
   RecurringExpense,
+  UpcomingExpense,
+  UpcomingIncome,
   YearlyReport,
 } from './types';
 
@@ -51,6 +53,8 @@ export const useFxRates = () => useQuery({ queryKey: ['fx-rates'], queryFn: () =
 
 export const useIncomeSources = () =>
   useQuery({ queryKey: ['income-sources'], queryFn: () => api.get<IncomeSource[]>('/income-sources') });
+export const useUpcomingIncome = (days = 45) =>
+  useQuery({ queryKey: ['income-sources', 'upcoming', days], queryFn: () => api.get<UpcomingIncome[]>('/income-sources/upcoming', { days }) });
 export const useIncomeEntries = (filters: Record<string, string | undefined>) =>
   useQuery({ queryKey: ['income-entries', filters], queryFn: () => api.get<IncomeEntry[]>('/income-entries', filters) });
 
@@ -64,6 +68,12 @@ export const useExpenseHistory = (id: string | null) =>
   });
 export const useRecurringExpenses = () =>
   useQuery({ queryKey: ['recurring-expenses'], queryFn: () => api.get<RecurringExpense[]>('/recurring-expenses') });
+
+export const useUpcomingExpenses = (days = 30) =>
+  useQuery({
+    queryKey: ['recurring-expenses', 'upcoming', days],
+    queryFn: () => api.get<UpcomingExpense[]>('/recurring-expenses/upcoming', { days }),
+  });
 
 export const useBudget = (month: string) =>
   useQuery({ queryKey: ['budget', month], queryFn: () => api.get<BudgetView>(`/budgets/${month}`) });
