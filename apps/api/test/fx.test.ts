@@ -83,7 +83,7 @@ describe('exchange rate resolution', () => {
     }) as typeof fetch;
 
     const result = await runFxSync(ctx.app.db, fakeFetch, '2099-01-05');
-    expect(result).toMatchObject({ bcrd: 1, ecb: 1, infodolar: 4, errors: [] });
+    expect(result).toEqual({ saved: { bcrd: 1, ecb: 1, infodolar: 4 }, errors: [] });
 
     const me = await registerUser(ctx, 'Tasas');
     const hid = me.me.household.id;
@@ -112,7 +112,7 @@ describe('exchange rate resolution', () => {
     const failing = (async (url: string) =>
       url.includes('frankfurter') ? Response.json({ rates: {} }) : new Response('', { status: 503 })) as typeof fetch;
     const result = await runFxSync(ctx.app.db, failing, '2099-01-06');
-    expect(result.ecb).toBe(0);
+    expect(result.saved.ecb).toBe(0);
     expect(result.errors.some((e: string) => e.startsWith('bcrd:'))).toBe(true);
     expect(result.errors.some((e: string) => e.startsWith('infodolar:'))).toBe(true);
   });

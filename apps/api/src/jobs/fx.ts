@@ -52,5 +52,5 @@ export const runFxSync = async (db: DbOrTx, fetcher: Fetcher = fetch, today = to
   const lastBcrd = await latest(db, 'bcrd');
   if (!lastBcrd || lastBcrd < addDays(today, -4)) await attempt('erapi', () => fetchErApi(fetcher, today));
 
-  return { ...result, errors };
+  return { saved: result, errors };
 };
