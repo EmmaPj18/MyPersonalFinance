@@ -57,6 +57,13 @@
       "when": 1792304091611,
       "tag": "0007_deduction_template_rows",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792305295440,
+      "tag": "0008_fixed_expense_debts",
+      "breakpoints": true
     }
   ]
 }

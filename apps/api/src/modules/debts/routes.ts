@@ -3,7 +3,7 @@ import Decimal from 'decimal.js';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { accounts, categories, debtPayments, debts, expenses } from '../../db/schema';
+import { accounts, categories, debtPayments, debts, expenses, recurringExpenses } from '../../db/schema';
 import { assertCanEdit, assertInHousehold, assertMembers, assertOwners, resolveSplits, visibilityFilter } from '../../lib/access';
 import { badRequest, notFound } from '../../lib/errors';
 import { currentUser, type AuthUser } from '../../plugins/auth';
@@ -35,8 +35,15 @@ export const debtRoutes: FastifyPluginAsyncZod = async (app) => {
           .where(inArray(debtPayments.debtId, rows.map((d) => d.id)))
           .orderBy(desc(debtPayments.date))
       : [];
+    const linked = rows.length
+      ? await db
+          .select({ id: recurringExpenses.id, name: recurringExpenses.name, debtId: recurringExpenses.debtId })
+          .from(recurringExpenses)
+          .where(inArray(recurringExpenses.debtId, rows.map((d) => d.id)))
+      : [];
     return rows.map((debt) => {
       const own = payments.filter((p) => p.debtId === debt.id);
+      const paidBy = linked.find((l) => l.debtId === debt.id);
       const principalPaid = own.reduce((acc, p) => acc.plus(p.principalPortion), new Decimal(0));
       const interestPaid = own.reduce((acc, p) => acc.plus(p.interestPortion), new Decimal(0));
       const original = new Decimal(debt.originalAmount);
@@ -47,6 +54,8 @@ export const debtRoutes: FastifyPluginAsyncZod = async (app) => {
         balance: Decimal.max(0, original.minus(principalPaid)).toFixed(2),
         progressPct: original.isZero() ? '100.00' : Decimal.min(100, principalPaid.div(original).times(100)).toFixed(2),
         payments: own,
+        /** Fixed expense whose installments pay this debt. */
+        recurringExpense: paidBy ? { id: paidBy.id, name: paidBy.name } : null,
       };
     });
   });

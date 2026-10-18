@@ -7,12 +7,13 @@ import {
 } from '@mypersonalfinance/shared';
 import { and, desc, eq, gte, inArray, lte, type SQL } from 'drizzle-orm';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { accounts, auditLog, categories, expenses, expenseSplits, users } from '../../db/schema';
+import { accounts, auditLog, categories, expenses, expenseSplits, recurringExpenses, users } from '../../db/schema';
 import { assertCanEdit, assertInHousehold, assertMembers, assertOwners, resolveOwner, resolveSplits, visibilityFilter } from '../../lib/access';
 import { writeAudit } from '../../lib/audit';
 import { monthRange } from '../../lib/dates';
 import { notFound } from '../../lib/errors';
 import { currentUser, type AuthUser } from '../../plugins/auth';
+import { syncDebtPayment } from '../debts/service';
 import { currentSplits, reassignExpense, writeSplits } from './service';
 
 export const expenseRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -204,6 +205,13 @@ export const expenseRoutes: FastifyPluginAsyncZod = async (app) => {
           .returning();
         if (expense!.scope === 'shared' && expense!.amount !== existing.amount) {
           await writeSplits(tx, expense!.id, expense!.amount, await currentSplits(tx, expense!.id));
+        }
+        if (expense!.recurringExpenseId) {
+          const [template] = await tx
+            .select({ debtId: recurringExpenses.debtId })
+            .from(recurringExpenses)
+            .where(eq(recurringExpenses.id, expense!.recurringExpenseId));
+          if (template?.debtId) await syncDebtPayment(tx, template.debtId, expense!);
         }
         return expense;
       });

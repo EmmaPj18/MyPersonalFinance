@@ -167,6 +167,7 @@ export const DebtsPage = () => {
                     <OwnerBadge scope={d.ownerUserId ? 'personal' : 'shared'} ownerUserId={d.ownerUserId} />
                     {d.interestRate && <span>{formatPct(d.interestRate)} anual</span>}
                     {d.dueDay && <span>· paga el día {d.dueDay}</span>}
+                    {d.recurringExpense && <Badge tone="primary">Cuotas automáticas: {d.recurringExpense.name}</Badge>}
                   </div>
                 </div>
                 {canWrite && (

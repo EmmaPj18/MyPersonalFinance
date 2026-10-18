@@ -267,6 +267,8 @@ export interface RecurringExpense {
   autoPay: boolean;
   paidByUserId: string | null;
   nextDate: string | null;
+  /** Debt whose installments this fixed expense pays. */
+  debtId: string | null;
   splits: Split[];
 }
 
@@ -367,6 +369,8 @@ export interface Debt {
   balance: string;
   progressPct: string;
   payments: { id: string; date: string; amount: string; principalPortion: string; interestPortion: string; expenseId: string | null }[];
+  /** Fixed expense whose installments pay this debt. */
+  recurringExpense: { id: string; name: string } | null;
 }
 
 export interface IncomeSummary {
