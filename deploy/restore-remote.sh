@@ -35,7 +35,7 @@ api=$(container api)
 echo "Uploading $(basename "$BACKUP")…"
 tmp=$(mktemp -d)
 cp "$BACKUP" "$tmp/restore.sql.gz"
-tar -C "$tmp" -cf "$tmp/restore.tar" restore.sql.gz
+tar -C "$tmp" --owner=0 --group=0 --numeric-owner -cf "$tmp/restore.tar" restore.sql.gz
 curl -sS --fail-with-body "${auth[@]}" -X PUT -H 'Content-Type: application/x-tar' \
   --data-binary "@$tmp/restore.tar" "${DOCKER}/containers/${db}/archive?path=/tmp"
 rm -rf "$tmp"
