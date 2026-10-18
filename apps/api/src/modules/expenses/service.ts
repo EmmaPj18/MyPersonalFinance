@@ -42,7 +42,7 @@ export const reassignExpense = async (tx: Tx, user: AuthUser, expense: Expense, 
 
   const [updated] = await tx
     .update(expenses)
-    .set({ scope: input.scope, ownerUserId })
+    .set({ scope: input.scope, ownerUserId, customSplit: input.scope === 'shared' && Boolean(input.splits?.length) })
     .where(eq(expenses.id, expense.id))
     .returning();
   await writeSplits(tx, expense.id, expense.amount, splits);

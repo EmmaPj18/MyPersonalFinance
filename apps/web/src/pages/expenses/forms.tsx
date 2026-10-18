@@ -209,7 +209,7 @@ export const ExpenseForm = ({
   const [owner, setOwner] = useState<Ownership>(
     initial ? { scope: initial.scope, ownerUserId: initial.ownerUserId } : { scope: 'shared', ownerUserId: null },
   );
-  const [split, setSplit] = useState<SplitState>(splitStateFrom(initial?.splits));
+  const [split, setSplit] = useState<SplitState>(splitStateFrom(initial?.splits, initial?.customSplit));
   const [paidBy, setPaidBy] = useState(initial?.paidByUserId ?? me.id);
   const [accountId, setAccountId] = useState<string | null>(initial?.accountId ?? null);
   const [pending, setPending] = useState(initial?.status === 'pending');
@@ -359,7 +359,7 @@ export const ReassignForm = ({
   onSubmit,
   onCancel,
 }: {
-  current: Ownership & { splits?: Expense['splits'] };
+  current: Ownership & { splits?: Expense['splits']; customSplit?: boolean };
   expenseId?: string;
   extra?: ReactNode;
   onSubmit: (payload: unknown) => Promise<unknown>;
@@ -367,7 +367,7 @@ export const ReassignForm = ({
 }) => {
   const { nameOf } = usePrefs();
   const [owner, setOwner] = useState<Ownership>({ scope: current.scope, ownerUserId: current.ownerUserId });
-  const [split, setSplit] = useState<SplitState>(splitStateFrom(current.scope === 'shared' ? current.splits : undefined));
+  const [split, setSplit] = useState<SplitState>(splitStateFrom(current.scope === 'shared' ? current.splits : undefined, current.customSplit));
   const history = useExpenseHistory(expenseId ?? null);
   const { error, saving, run } = useSubmit(onSubmit);
   const unchanged = owner.scope === current.scope && owner.ownerUserId === current.ownerUserId && !split.custom;

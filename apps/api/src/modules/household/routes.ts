@@ -17,6 +17,7 @@ import { hashToken, newToken } from '../../lib/tokens';
 import { currentUser } from '../../plugins/auth';
 import { findUserByEmail, hashPassword } from '../auth/routes';
 import { leavePreview, mergeManagedMember, moveUser, openMembership } from './membership';
+import { applyDefaultSplits } from './splits';
 
 const INVITATION_TTL_DAYS = 7;
 
@@ -116,16 +117,20 @@ export const householdRoutes: FastifyPluginAsyncZod = async (app) => {
           .where(and(eq(users.householdId, user.householdId), eq(users.role, 'owner')));
         if (Number(owners?.n) <= 1) throw conflict('El hogar debe tener al menos un dueño', 'LAST_OWNER');
       }
-      const [updated] = await db
-        .update(users)
-        .set({
-          ...(role ? { role } : {}),
-          ...(name ? { name } : {}),
-          ...(defaultSplitPct !== undefined ? { defaultSplitPct: defaultSplitPct === null ? null : String(defaultSplitPct) } : {}),
-        })
-        .where(eq(users.id, member.id))
-        .returning({ id: users.id, name: users.name, role: users.role, defaultSplitPct: users.defaultSplitPct });
-      return updated;
+      return db.transaction(async (tx) => {
+        const [updated] = await tx
+          .update(users)
+          .set({
+            ...(role ? { role } : {}),
+            ...(name ? { name } : {}),
+            ...(defaultSplitPct !== undefined ? { defaultSplitPct: defaultSplitPct === null ? null : String(defaultSplitPct) } : {}),
+          })
+          .where(eq(users.id, member.id))
+          .returning({ id: users.id, name: users.name, role: users.role, defaultSplitPct: users.defaultSplitPct });
+        // Shared records without a custom split follow the new default split.
+        if (defaultSplitPct !== undefined) await applyDefaultSplits(tx, user.householdId);
+        return updated;
+      });
     },
   );
 

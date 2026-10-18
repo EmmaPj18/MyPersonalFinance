@@ -46,7 +46,13 @@ export const HouseholdSettings = () => {
 
   const refreshAll = () => qc.invalidateQueries();
   const updateHousehold = useApiMutation((payload: unknown) => api.patch('/household', payload), ['household', 'me']);
-  const updateMember = useApiMutation(({ id, payload }: { id: string; payload: unknown }) => api.patch(`/household/members/${id}`, payload), ['household', 'me']);
+  // The default split also re-splits shared records that follow it.
+  const updateMember = useApiMutation(({ id, payload }: { id: string; payload: unknown }) => api.patch(`/household/members/${id}`, payload), [
+    'household',
+    'me',
+    'expenses',
+    'income-entries',
+  ]);
   const removeMember = useApiMutation((id: string) => api.del(`/household/members/${id}`), ['household']);
   const transfer = useApiMutation((userId: string) => api.post('/household/transfer-ownership', { userId }), ['household', 'me']);
   const addManaged = useApiMutation((name: string) => api.post('/household/members', { name }), ['household']);

@@ -75,7 +75,7 @@ export const IncomeEntryForm = ({
         ? []
         : rowsFromTemplate(firstSource),
   );
-  const [split, setSplit] = useState<SplitState>(splitStateFrom(initial?.splits));
+  const [split, setSplit] = useState<SplitState>(splitStateFrom(initial?.splits, initial?.customSplit));
   const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
 
