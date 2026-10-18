@@ -64,6 +64,13 @@
       "when": 1792305295440,
       "tag": "0008_fixed_expense_debts",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792306968286,
+      "tag": "0009_live_default_splits",
+      "breakpoints": true
     }
   ]
 }

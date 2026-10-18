@@ -279,7 +279,13 @@ export const incomeRoutes: FastifyPluginAsyncZod = async (app) => {
     return db.transaction(async (tx) => {
       const { deductions, splits: _s, ...values } = input;
       // Saving an entry confirms its amounts (scheduled entries start as estimates).
-      const data = { ...values, netAmount, accountId: input.accountId ?? source.accountId ?? null, isEstimated: false };
+      const data = {
+        ...values,
+        netAmount,
+        accountId: input.accountId ?? source.accountId ?? null,
+        isEstimated: false,
+        customSplit: source.scope === 'shared' && Boolean(input.splits?.length),
+      };
       const [entry] = id
         ? await tx.update(incomeEntries).set(data).where(eq(incomeEntries.id, id)).returning()
         : await tx

@@ -103,6 +103,7 @@ export const expenseRoutes: FastifyPluginAsyncZod = async (app) => {
           ...input,
           ownerUserId,
           paidByUserId: input.paidByUserId ?? user.id,
+          customSplit: input.scope === 'shared' && Boolean(splitInput?.length),
           householdId: user.householdId,
           createdBy: user.id,
         })
@@ -125,20 +126,18 @@ export const expenseRoutes: FastifyPluginAsyncZod = async (app) => {
       await assertOwners(db, user.householdId, [ownerUserId]);
       assertCanEdit(user, ownerUserId);
       await validateRefs(user, input);
-      // Keep the current split when editing a shared expense without sending a new one.
+      // No split sent keeps a custom split; an empty one goes back to the default split.
+      const keepCustom = splitInput === undefined && existing.scope === 'shared' && existing.customSplit;
+      const customSplit = input.scope === 'shared' && (keepCustom || Boolean(splitInput?.length));
       const splits =
         input.scope === 'shared'
-          ? await resolveSplits(
-              db,
-              user.householdId,
-              splitInput ?? (existing.scope === 'shared' ? await currentSplits(db, existing.id) : undefined),
-            )
+          ? await resolveSplits(db, user.householdId, keepCustom ? await currentSplits(db, existing.id) : splitInput)
           : [];
 
       return db.transaction(async (tx) => {
         const [expense] = await tx
           .update(expenses)
-          .set({ ...input, ownerUserId, paidByUserId: input.paidByUserId ?? existing.paidByUserId, isEstimated: false })
+          .set({ ...input, ownerUserId, paidByUserId: input.paidByUserId ?? existing.paidByUserId, customSplit, isEstimated: false })
           .where(eq(expenses.id, existing.id))
           .returning();
         const rows = await writeSplits(tx, expense!.id, expense!.amount, splits);

@@ -126,20 +126,21 @@ export interface SplitState {
   shares: Record<string, string>;
 }
 
-export const splitStateFrom = (splits: Split[] | undefined): SplitState => ({
-  custom: Boolean(splits?.length),
+/** `custom` says whether the stored split was chosen by hand (otherwise it's the default split). */
+export const splitStateFrom = (splits: Split[] | undefined, custom = Boolean(splits?.length)): SplitState => ({
+  custom: custom && Boolean(splits?.length),
   shares: Object.fromEntries((splits ?? []).map((s) => [s.userId, String(Number(s.sharePct))])),
 });
 
 export const splitTotal = (state: SplitState) => Object.values(state.shares).reduce((acc, v) => acc + (Number(v) || 0), 0);
 
-/** Splits to send to the API (undefined = use the members' default split). */
+/** Splits to send to the API (empty = follow the members' default split). */
 export const splitsPayload = (state: SplitState) =>
   state.custom
     ? Object.entries(state.shares)
         .filter(([, v]) => Number(v) > 0)
         .map(([userId, v]) => ({ userId, sharePct: Number(v) }))
-    : undefined;
+    : [];
 
 export const SplitEditor = ({
   value,
