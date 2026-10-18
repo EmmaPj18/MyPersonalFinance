@@ -1,7 +1,7 @@
 import type { BudgetLineKind, Currency, ExpenseNature, Scope } from '@mypersonalfinance/shared';
 import clsx from 'clsx';
 import { ChevronLeft, ChevronRight, Copy, Equal, Plus, Sparkles, Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { CurrencySelect, Money, OwnerBadge, OwnerSelect } from '../components/finance';
 import {
@@ -69,6 +69,33 @@ const total = (values: (string | number)[]) => values.reduce<number>((acc, v) =>
 /** Grid numbers: no currency symbol (it's in the subtitle) and no cents, to keep 12 months readable. */
 const numberFormat = new Intl.NumberFormat('es-DO', { maximumFractionDigits: 0 });
 const compact = (v: number, _currency?: Currency) => (Math.round(v) === 0 ? '—' : numberFormat.format(Math.round(v)));
+const centsFormat = new Intl.NumberFormat('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** Whole amounts without cents, the rest with two decimals (82,343.04). */
+const formatAmount = (v: number) => (Number.isInteger(v) ? numberFormat.format(v) : centsFormat.format(v));
+
+/** Editable plan amount: thousands separators while reading, the raw number while typing. */
+const PlanInput = ({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) => {
+  const ref = useRef<HTMLInputElement>(null);
+  const [editing, setEditing] = useState(false);
+  const raw = value.replace(/\.00$/, '').replace(/^0$/, '');
+  // Select the raw value as soon as it replaces the formatted one, before the next keystroke.
+  useLayoutEffect(() => {
+    if (editing) ref.current?.select();
+  }, [editing]);
+  return (
+    <input
+      ref={ref}
+      aria-label={label}
+      inputMode="decimal"
+      className="tabular h-8 w-full min-w-20 rounded-md border border-transparent bg-transparent px-1.5 text-right text-sm hover:border-border focus:border-primary focus:outline-none"
+      value={editing || raw === '' ? raw : formatAmount(Number(raw))}
+      placeholder="—"
+      onFocus={() => setEditing(true)}
+      onBlur={() => setEditing(false)}
+      onChange={(e) => onChange(e.target.value.replace(/[^\d.]/g, ''))}
+    />
+  );
+};
 
 /** Positive when the month went better than planned (more income, less spending). */
 const goodness = (kind: BudgetLineKind, plan: number, actual: number) => (kind === 'expense' ? plan - actual : actual - plan);
@@ -178,14 +205,7 @@ export const BudgetPage = () => {
     const actual = Number(actualByIdentity.get(identity(l))?.actual[m] ?? 0);
     if (mode === 'plan') {
       return canWrite ? (
-        <input
-          aria-label={`${nameOfLine(l)} ${MONTH_LABELS[m]}`}
-          inputMode="decimal"
-          className="tabular h-8 w-full min-w-20 rounded-md border border-transparent bg-transparent px-1.5 text-right text-sm hover:border-border focus:border-primary focus:outline-none"
-          value={(l.amounts[m] ?? '').replace(/\.00$/, '').replace(/^0$/, '')}
-          placeholder="—"
-          onChange={(e) => setAmount(l.key, m, e.target.value.replace(/[^\d.]/g, ''))}
-        />
+        <PlanInput label={`${nameOfLine(l)} ${MONTH_LABELS[m]}`} value={l.amounts[m] ?? ''} onChange={(v) => setAmount(l.key, m, v)} />
       ) : (
         <span className="tabular px-1.5">{compact(plan, cur)}</span>
       );
