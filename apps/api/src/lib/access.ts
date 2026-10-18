@@ -6,25 +6,31 @@ import { users } from '../db/schema';
 import type { AuthUser } from '../plugins/auth';
 import { badRequest, forbidden, notFound } from './errors';
 
+/** Personal records the user manages: their own and those of members without an account. */
+const managedBy = (user: AuthUser, ownerUserId: string | null) =>
+  ownerUserId === user.id || (ownerUserId !== null && user.managedMemberIds.includes(ownerUserId));
+
 /**
- * Personal records of other members are visible only when the household privacy mode is "open".
+ * Personal records of other members are visible only when the household privacy mode is "open"
+ * (records of members without an account are always visible: the household manages them).
  * Returns a condition to AND into queries (undefined = no restriction).
  */
 export const visibilityFilter = (user: AuthUser, ownerCol: AnyPgColumn, scopeCol?: AnyPgColumn): SQL | undefined => {
   if (user.privacyMode === 'open') return undefined;
-  return scopeCol ? or(eq(scopeCol, 'shared'), eq(ownerCol, user.id)) : or(eq(ownerCol, user.id), isNull(ownerCol));
+  const owners = [user.id, ...user.managedMemberIds];
+  return scopeCol ? or(eq(scopeCol, 'shared'), inArray(ownerCol, owners)) : or(inArray(ownerCol, owners), isNull(ownerCol));
 };
 
 export const canSee = (user: AuthUser, ownerUserId: string | null) =>
-  user.privacyMode === 'open' || ownerUserId === null || ownerUserId === user.id;
+  user.privacyMode === 'open' || ownerUserId === null || managedBy(user, ownerUserId);
 
 /**
- * Writers may edit shared records and their own personal records; owners may edit everything.
- * Viewers are blocked earlier by `requireWriter`.
+ * Writers may edit shared records, their own personal records and those of members without an
+ * account; owners may edit everything. Viewers are blocked earlier by `requireWriter`.
  */
 export const assertCanEdit = (user: AuthUser, ownerUserId: string | null) => {
   if (user.role === 'viewer') throw forbidden('Tu rol es de solo lectura');
-  if (ownerUserId && ownerUserId !== user.id && user.role !== 'owner') {
+  if (ownerUserId && !managedBy(user, ownerUserId) && user.role !== 'owner') {
     throw forbidden('Solo el dueño del registro o del hogar puede modificarlo');
   }
 };
@@ -40,22 +46,8 @@ export const assertMembers = async (db: DbOrTx, householdId: string, userIds: (s
   if (rows.length !== ids.length) throw badRequest('Alguno de los miembros indicados no pertenece al hogar');
 };
 
-/**
- * Ensures each id is a member with an account. Members without an account (managed) only take
- * part in what's shared by the household, so they can't own personal records.
- */
-export const assertOwners = async (db: DbOrTx, householdId: string, userIds: (string | null | undefined)[]) => {
-  const ids = [...new Set(userIds.filter((v): v is string => Boolean(v)))];
-  if (ids.length === 0) return;
-  const rows = await db
-    .select({ id: users.id, status: users.accountStatus })
-    .from(users)
-    .where(and(eq(users.householdId, householdId), inArray(users.id, ids)));
-  if (rows.length !== ids.length) throw badRequest('Alguno de los miembros indicados no pertenece al hogar');
-  if (rows.some((r) => r.status !== 'active')) {
-    throw badRequest('Un miembro sin cuenta solo participa en lo del hogar; no puede tener registros personales');
-  }
-};
+/** Ensures each id can own personal records: any current member, with or without an account. */
+export const assertOwners = assertMembers;
 
 /** Ensures an optional reference (account, category...) belongs to the household. */
 export const assertInHousehold = async (

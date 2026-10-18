@@ -17,6 +17,8 @@ export interface AuthUser {
   defaultCurrency: Currency;
   privacyMode: PrivacyMode;
   baseCurrency: Currency;
+  /** Members of the household without an account: any writer manages their records. */
+  managedMemberIds: string[];
 }
 
 declare module 'fastify' {
@@ -69,7 +71,15 @@ export default fp(async (app: FastifyInstance) => {
       .where(and(eq(sessions.id, hashToken(unsigned.value)), gt(sessions.expiresAt, new Date())))
       .limit(1);
     // Only members with an account have sessions; email is always set for them.
-    request.user = row?.email ? { ...row, email: row.email } : null;
+    if (!row?.email) {
+      request.user = null;
+      return;
+    }
+    const managed = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.householdId, row.householdId), eq(users.accountStatus, 'managed')));
+    request.user = { ...row, email: row.email, managedMemberIds: managed.map((m) => m.id) };
   });
 
   app.decorate('authenticate', async (request: FastifyRequest) => {

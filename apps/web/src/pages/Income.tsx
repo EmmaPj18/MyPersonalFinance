@@ -15,7 +15,7 @@ import { SourceForm } from './income/SourceForm';
 type EntryModal = { mode: 'new'; sourceId?: string; kind?: IncomeKind } | { mode: 'edit'; entry: IncomeEntry } | null;
 
 export const IncomePage = () => {
-  const { month, currency, view, canWrite, me } = usePrefs();
+  const { month, currency, view, canWrite, me, isMine } = usePrefs();
   const sources = useIncomeSources();
   const upcoming = useUpcomingIncome(45);
   const deductionTypes = useDeductionTypes();
@@ -39,7 +39,7 @@ export const IncomePage = () => {
   const deleteEntry = useApiMutation((id: string) => api.del(`/income-entries/${id}`), ['income-entries']);
 
   // In "Mis finanzas" show my personal incomes and the shared ones.
-  const visibleEntries = (entries.data ?? []).filter((e) => view === 'household' || e.scope === 'shared' || e.ownerUserId === me.id);
+  const visibleEntries = (entries.data ?? []).filter((e) => view === 'household' || e.scope === 'shared' || isMine(e.ownerUserId));
   const activeSources = (sources.data ?? []).filter((s) => s.isActive);
   const summary = report.data?.income;
 

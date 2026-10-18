@@ -74,7 +74,7 @@ const compact = (v: number, _currency?: Currency) => (Math.round(v) === 0 ? '—
 const goodness = (kind: BudgetLineKind, plan: number, actual: number) => (kind === 'expense' ? plan - actual : actual - plan);
 
 export const BudgetPage = () => {
-  const { month, setMonth, canWrite, me, view, nameOf } = usePrefs();
+  const { month, setMonth, canWrite, me, view, nameOf, isMine } = usePrefs();
   const navigate = useNavigate();
   const [year, setYear] = useState(Number(month.slice(0, 4)));
   const [mode, setMode] = useState<Mode>('plan');
@@ -102,7 +102,7 @@ export const BudgetPage = () => {
 
   const data = budget.data;
   const lines = useMemo(() => draft ?? data?.lines.map(toDraft) ?? [], [draft, data]);
-  const visibleLines = lines.filter((l) => view === 'household' || l.scope === 'shared' || l.ownerUserId === me.id);
+  const visibleLines = lines.filter((l) => view === 'household' || l.scope === 'shared' || isMine(l.ownerUserId));
   const actualByIdentity = useMemo(() => new Map((data?.lines ?? []).map((l) => [identity(l), l])), [data]);
   const dirty = draft !== null;
 
@@ -310,7 +310,7 @@ export const BudgetPage = () => {
                 </td>
               </tr>
               {data.unbudgeted
-                .filter((u) => view === 'household' || u.scope === 'shared' || u.ownerUserId === me.id)
+                .filter((u) => view === 'household' || u.scope === 'shared' || isMine(u.ownerUserId))
                 .map((u) => (
                   <tr key={`${u.categoryId}-${u.scope}-${u.ownerUserId}`} className="border-t border-border">
                     <td className="sticky left-0 z-10 bg-surface px-3 py-1">

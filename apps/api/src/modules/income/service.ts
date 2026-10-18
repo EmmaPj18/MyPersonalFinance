@@ -73,7 +73,8 @@ export const generateScheduledIncome = async (tx: Tx, source: IncomeSource, toda
     const templates = await tx
       .select()
       .from(sourceDeductionTemplates)
-      .where(eq(sourceDeductionTemplates.sourceId, source.id));
+      .where(eq(sourceDeductionTemplates.sourceId, source.id))
+      .orderBy(sourceDeductionTemplates.sortOrder);
     const deductions = templates.map((t) => ({ deductionTypeId: t.deductionTypeId, amount: t.defaultAmount }));
     const netAmount = computeNet(source.expectedGross, deductions.map((d) => d.amount));
     const splits = source.scope === 'shared' ? await resolveSplits(tx, source.householdId, undefined) : [];
