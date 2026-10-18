@@ -107,7 +107,7 @@ const ContributionForm = ({ goal, onSubmit, onCancel }: { goal: Goal; onSubmit: 
 };
 
 export const GoalsPage = () => {
-  const { canWrite, view, me } = usePrefs();
+  const { canWrite, view, isMine } = usePrefs();
   const goals = useGoals();
   const [modal, setModal] = useState<{ kind: 'goal'; goal?: Goal } | { kind: 'contribution'; goal: Goal } | null>(null);
   const save = useApiMutation(({ id, payload }: { id?: string; payload: unknown }) => (id ? api.put(`/goals/${id}`, payload) : api.post('/goals', payload)), ['goals']);
@@ -115,7 +115,7 @@ export const GoalsPage = () => {
   const contribute = useApiMutation(({ id, payload }: { id: string; payload: unknown }) => api.post(`/goals/${id}/contributions`, payload), ['goals']);
   const removeContribution = useApiMutation(({ goalId, id }: { goalId: string; id: string }) => api.del(`/goals/${goalId}/contributions/${id}`), ['goals']);
   const close = () => setModal(null);
-  const list = (goals.data ?? []).filter((g) => view === 'household' || !g.ownerUserId || g.ownerUserId === me.id);
+  const list = (goals.data ?? []).filter((g) => view === 'household' || !g.ownerUserId || isMine(g.ownerUserId));
 
   return (
     <>

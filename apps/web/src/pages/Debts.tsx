@@ -130,7 +130,7 @@ const PaymentForm = ({ debt, onSubmit, onCancel }: { debt: Debt; onSubmit: (p: u
 };
 
 export const DebtsPage = () => {
-  const { canWrite, view, me } = usePrefs();
+  const { canWrite, view, isMine } = usePrefs();
   const debts = useDebts();
   const [modal, setModal] = useState<{ kind: 'debt'; debt?: Debt } | { kind: 'payment'; debt: Debt } | null>(null);
   const save = useApiMutation(({ id, payload }: { id?: string; payload: unknown }) => (id ? api.put(`/debts/${id}`, payload) : api.post('/debts', payload)), ['debts']);
@@ -138,7 +138,7 @@ export const DebtsPage = () => {
   const pay = useApiMutation(({ id, payload }: { id: string; payload: unknown }) => api.post(`/debts/${id}/payments`, payload), ['debts', 'expenses']);
   const removePayment = useApiMutation(({ debtId, id }: { debtId: string; id: string }) => api.del(`/debts/${debtId}/payments/${id}`), ['debts', 'expenses']);
   const close = () => setModal(null);
-  const list = (debts.data ?? []).filter((d) => view === 'household' || !d.ownerUserId || d.ownerUserId === me.id);
+  const list = (debts.data ?? []).filter((d) => view === 'household' || !d.ownerUserId || isMine(d.ownerUserId));
 
   return (
     <>

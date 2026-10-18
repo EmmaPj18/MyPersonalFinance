@@ -7,7 +7,7 @@ const addManaged = async (owner: Client, name = 'Paola') =>
   owner.ok<{ id: string; accountStatus: string }>('POST', '/household/members', { name });
 
 describe('members without an account', () => {
-  it('take part in shared expenses but cannot own personal records or log in', async () => {
+  it('take part in shared expenses and can have personal records managed by the household', async () => {
     const owner = await registerUser(ctx, 'Emmanuel');
     const paola = await addManaged(owner);
     expect(paola.accountStatus).toBe('managed');
@@ -28,7 +28,16 @@ describe('members without an account', () => {
     const balances = await owner.ok('GET', '/reports/member-balances');
     expect(balances.members.find((m: any) => m.userId === paola.id)).toMatchObject({ paid: '1000.00', balance: '500.00' });
 
-    const personal = await owner.post('/expenses', {
+    // Her salary and personal expenses can be registered for her.
+    const salary = await owner.ok('POST', '/income-sources', {
+      name: 'Trabajo de Paola',
+      type: 'formal_employment',
+      defaultCurrency: 'DOP',
+      scope: 'personal',
+      ownerUserId: paola.id,
+    });
+    expect(salary.ownerUserId).toBe(paola.id);
+    const personal = await owner.ok('POST', '/expenses', {
       description: 'Ropa',
       amount: '100',
       currency: 'DOP',
@@ -36,7 +45,17 @@ describe('members without an account', () => {
       scope: 'personal',
       ownerUserId: paola.id,
     });
-    expect(personal.status).toBe(400);
+    expect(personal.ownerUserId).toBe(paola.id);
+
+    // Any member with an account manages them, even with "aggregated" privacy.
+    const email = uniqueEmail('miembro');
+    const inv = await owner.ok('POST', '/household/invitations', { email, role: 'member' });
+    const member = new Client(ctx);
+    await member.ok('POST', `/invitations/${inv.url.split('/').pop()}/accept`, { name: 'Otro', password: 'secret123' });
+    await owner.ok('PATCH', '/household', { privacyMode: 'aggregated' });
+    const visible = await member.ok<any[]>('GET', '/expenses');
+    expect(visible.map((e) => e.description)).toContain('Ropa');
+    expect((await member.put(`/expenses/${personal.id}`, { description: 'Ropa y zapatos', amount: '150', currency: 'DOP', date: '2026-10-02', scope: 'personal', ownerUserId: paola.id })).status).toBe(200);
 
     // Can't be deleted while referenced; can be renamed.
     expect((await owner.del(`/household/members/${paola.id}`)).status).toBe(409);

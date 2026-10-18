@@ -82,6 +82,7 @@ export const incomeRoutes: FastifyPluginAsyncZod = async (app) => {
           .select()
           .from(sourceDeductionTemplates)
           .where(inArray(sourceDeductionTemplates.sourceId, sources.map((s) => s.id)))
+          .orderBy(sourceDeductionTemplates.sortOrder)
       : [];
     const today = await householdToday(user.householdId);
     return sources.map((s) => ({
@@ -130,7 +131,7 @@ export const incomeRoutes: FastifyPluginAsyncZod = async (app) => {
         if (templates.length) {
           await tx
             .insert(sourceDeductionTemplates)
-            .values(templates.map((t) => ({ sourceId: source!.id, ...t })));
+            .values(templates.map((t, sortOrder) => ({ sourceId: source!.id, ...t, sortOrder })));
         }
       }
       return source!;

@@ -309,6 +309,7 @@ export const incomeSources = pgTable(
 export const sourceDeductionTemplates = pgTable(
   'source_deduction_templates',
   {
+    id: id(),
     sourceId: uuid('source_id')
       .notNull()
       .references(() => incomeSources.id, { onDelete: 'cascade' }),
@@ -316,8 +317,10 @@ export const sourceDeductionTemplates = pgTable(
       .notNull()
       .references(() => deductionTypes.id, { onDelete: 'cascade' }),
     defaultAmount: money('default_amount').notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
   },
-  (t) => [primaryKey({ columns: [t.sourceId, t.deductionTypeId] })],
+  // The same deduction type can appear twice (e.g. complementary insurance for two people).
+  (t) => [index('source_deduction_templates_source_idx').on(t.sourceId)],
 );
 
 export const incomeEntries = pgTable(

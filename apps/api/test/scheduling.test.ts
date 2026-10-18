@@ -22,6 +22,42 @@ describe('scheduled incomes', () => {
       autoRegister: true,
       deductionTemplates: [{ deductionTypeId: afp.id, defaultAmount: '1435' }],
     });
+    // The same deduction type can be repeated in the template (e.g. two insurances).
+    const health = (await me.ok<any[]>('GET', '/deduction-types')).find((t) => t.name === 'Seguro complementario');
+    const repeated = await me.put(`/income-sources/${source.id}`, {
+      name: 'DGII',
+      type: 'formal_employment',
+      defaultCurrency: 'DOP',
+      payFrequency: 'semimonthly',
+      payDay: 15,
+      secondPayDay: 31,
+      scheduleStartDate: '2099-01-01',
+      expectedGross: '50000',
+      accountId: account.id,
+      autoRegister: true,
+      deductionTemplates: [
+        { deductionTypeId: afp.id, defaultAmount: '1435' },
+        { deductionTypeId: health.id, defaultAmount: '529.40' },
+        { deductionTypeId: health.id, defaultAmount: '2529.28' },
+      ],
+    });
+    expect(repeated.status).toBe(200);
+    const [saved] = (await me.ok<any[]>('GET', '/income-sources')).filter((s) => s.id === source.id);
+    expect(saved.deductionTemplates.map((t: any) => t.defaultAmount)).toEqual(['1435.00', '529.40', '2529.28']);
+    // Back to the single AFP deduction for the rest of the test.
+    await me.ok('PUT', `/income-sources/${source.id}`, {
+      name: 'DGII',
+      type: 'formal_employment',
+      defaultCurrency: 'DOP',
+      payFrequency: 'semimonthly',
+      payDay: 15,
+      secondPayDay: 31,
+      scheduleStartDate: '2099-01-01',
+      expectedGross: '50000',
+      accountId: account.id,
+      autoRegister: true,
+      deductionTemplates: [{ deductionTypeId: afp.id, defaultAmount: '1435' }],
+    });
 
     expect(await runJobs(ctx, me.me.household.id, '2099-01-31')).toEqual({ incomes: 2, expenses: 0 });
     expect(await runJobs(ctx, me.me.household.id, '2099-01-31')).toEqual({ incomes: 0, expenses: 0 });

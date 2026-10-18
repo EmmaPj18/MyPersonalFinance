@@ -41,9 +41,9 @@ type ModalState =
   | null;
 
 const ExpenseTable = ({ expenses, onAction }: { expenses: Expense[]; onAction: (m: ModalState) => void }) => {
-  const { nameOf, canWrite, me, isOwner } = usePrefs();
+  const { nameOf, canEditOwner } = usePrefs();
   const remove = useApiMutation((id: string) => api.del(`/expenses/${id}`), ['expenses']);
-  const editable = (e: Expense) => canWrite && (isOwner || e.scope === 'shared' || e.ownerUserId === me.id);
+  const editable = (e: Expense) => canEditOwner(e.ownerUserId);
 
   return (
     <Table>
@@ -128,12 +128,12 @@ const monthlyCommitted = (templates: RecurringExpense[]) => {
 };
 
 const FixedExpenses = ({ onAction }: { onAction: (m: ModalState) => void }) => {
-  const { canWrite, isOwner, me, view, nameOf } = usePrefs();
+  const { canWrite, view, nameOf, isMine, canEditOwner } = usePrefs();
   const templates = useRecurringExpenses();
   const upcoming = useUpcomingExpenses(30);
   const accounts = useAccounts();
   const remove = useApiMutation((id: string) => api.del(`/recurring-expenses/${id}`), ['recurring-expenses', 'expenses']);
-  const visible = (templates.data ?? []).filter((t) => view === 'household' || t.scope === 'shared' || t.ownerUserId === me.id);
+  const visible = (templates.data ?? []).filter((t) => view === 'household' || t.scope === 'shared' || isMine(t.ownerUserId));
   const accountName = (id: string | null) => accounts.data?.find((a) => a.id === id)?.name;
 
   if (templates.isLoading) return <Spinner />;
@@ -193,7 +193,7 @@ const FixedExpenses = ({ onAction }: { onAction: (m: ModalState) => void }) => {
                 {t.paidByUserId && ` · lo paga ${nameOf(t.paidByUserId)}`}
                 {accountName(t.accountId) && ` · ${accountName(t.accountId)}`}
               </p>
-              {canWrite && (isOwner || t.scope === 'shared' || t.ownerUserId === me.id) && (
+              {canEditOwner(t.ownerUserId) && (
                 <div className="mt-2 flex justify-end">
                   <IconButton label="Cambiar dueño" onClick={() => onAction({ kind: 'reassign-recurring', template: t })} icon={<UserRoundCog className="size-4" />} />
                   <IconButton label="Editar" onClick={() => onAction({ kind: 'recurring', template: t })} icon={<Pencil className="size-4" />} />
@@ -215,7 +215,7 @@ const FixedExpenses = ({ onAction }: { onAction: (m: ModalState) => void }) => {
         ) : (
           <ul className="divide-y divide-border">
             {upcoming.data
-              .filter((u) => view === 'household' || u.scope === 'shared' || u.ownerUserId === me.id)
+              .filter((u) => view === 'household' || u.scope === 'shared' || isMine(u.ownerUserId))
               .map((u) => (
                 <li key={`${u.recurringExpenseId}-${u.date}`} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                   <CalendarClock className="size-4 shrink-0 text-muted" aria-hidden />
@@ -237,7 +237,7 @@ const FixedExpenses = ({ onAction }: { onAction: (m: ModalState) => void }) => {
 };
 
 export const ExpensesPage = () => {
-  const { month, view, me, members, canWrite } = usePrefs();
+  const { month, view, members, canWrite, isMine } = usePrefs();
   const [tab, setTab] = useState<Tab>('movements');
   const [nature, setNature] = useState<NatureFilter>('all');
   const [scope, setScope] = useState<ScopeFilter>('all');
@@ -279,7 +279,7 @@ export const ExpensesPage = () => {
   );
 
   // "Mis finanzas": my personal expenses + the shared ones.
-  const rows = (expenses.data ?? []).filter((e) => view === 'household' || e.scope === 'shared' || e.ownerUserId === me.id);
+  const rows = (expenses.data ?? []).filter((e) => view === 'household' || e.scope === 'shared' || isMine(e.ownerUserId));
   const total = rows.reduce((acc, e) => acc.set(e.currency, (acc.get(e.currency) ?? 0) + Number(e.amount)), new Map<Currency, number>());
 
   return (

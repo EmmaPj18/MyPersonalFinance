@@ -19,6 +19,10 @@ interface Prefs {
   nameOf: (userId: string | null | undefined) => string;
   canWrite: boolean;
   isOwner: boolean;
+  /** Personal records the user can edit: own, of members without an account, or all if owner. */
+  canEditOwner: (ownerUserId: string | null) => boolean;
+  /** Personal records shown in "Mis finanzas". */
+  isMine: (ownerUserId: string | null) => boolean;
 }
 
 const PrefsContext = createContext<Prefs | null>(null);
@@ -69,6 +73,10 @@ export const PrefsProvider = ({ me, children }: { me: Me; children: ReactNode })
       nameOf: (id) => (id ? (names.get(id) ?? 'Desconocido') : 'Hogar'),
       canWrite: me.role !== 'viewer',
       isOwner: me.role === 'owner',
+      canEditOwner: (ownerUserId) =>
+        me.role !== 'viewer' &&
+        (me.role === 'owner' || !ownerUserId || ownerUserId === me.id || members.some((m) => m.id === ownerUserId && m.accountStatus === 'managed')),
+      isMine: (ownerUserId) => ownerUserId === me.id,
     };
   }, [me, view, currency, month, household.data]);
 
