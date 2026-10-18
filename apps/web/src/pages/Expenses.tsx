@@ -1,5 +1,5 @@
 import { occurrencesPerYear, type Currency, type ExpenseNature, type Scope } from '@mypersonalfinance/shared';
-import { CalendarClock, CheckCircle2, FileUp, Pencil, Plus, Repeat, Trash2, UserRoundCog, Zap } from 'lucide-react';
+import { CalendarClock, CheckCircle2, FileUp, HandCoins, Pencil, Plus, Repeat, Trash2, Unlink, UserRoundCog, Zap } from 'lucide-react';
 import { useState } from 'react';
 import { Money, OwnerBadge } from '../components/finance';
 import { MonthPicker } from '../components/layout/AppLayout';
@@ -26,6 +26,7 @@ import { useAccounts, useApiMutation, useCategories, useExpenses, useInbox, useR
 import type { Expense, RecurringExpense } from '../lib/types';
 import { ExpenseForm, PayForm, ReassignForm, RecurringForm } from './expenses/forms';
 import { ImportWizard } from './expenses/ImportWizard';
+import { LinkDebtForm } from './expenses/LinkDebtForm';
 import { ReviewInbox } from './expenses/ReviewInbox';
 
 type Tab = 'movements' | 'fixed' | 'review';
@@ -38,6 +39,7 @@ type ModalState =
   | { kind: 'reassign'; expense: Expense }
   | { kind: 'recurring'; template?: RecurringExpense; fromExpense?: Expense }
   | { kind: 'reassign-recurring'; template: RecurringExpense }
+  | { kind: 'link-debt'; template: RecurringExpense }
   | null;
 
 const ExpenseTable = ({ expenses, onAction }: { expenses: Expense[]; onAction: (m: ModalState) => void }) => {
@@ -133,6 +135,7 @@ const FixedExpenses = ({ onAction }: { onAction: (m: ModalState) => void }) => {
   const upcoming = useUpcomingExpenses(30);
   const accounts = useAccounts();
   const remove = useApiMutation((id: string) => api.del(`/recurring-expenses/${id}`), ['recurring-expenses', 'expenses']);
+  const unlink = useApiMutation((id: string) => api.post(`/recurring-expenses/${id}/unlink-debt`), ['recurring-expenses', 'debts']);
   const visible = (templates.data ?? []).filter((t) => view === 'household' || t.scope === 'shared' || isMine(t.ownerUserId));
   const accountName = (id: string | null) => accounts.data?.find((a) => a.id === id)?.name;
 
@@ -186,6 +189,11 @@ const FixedExpenses = ({ onAction }: { onAction: (m: ModalState) => void }) => {
                   <Badge>Confirmación manual</Badge>
                 )}
                 {t.isVariableAmount && <Badge tone="warning">Monto variable</Badge>}
+                {t.debtId && (
+                  <Badge tone="success">
+                    <HandCoins className="size-3" aria-hidden /> Paga una deuda
+                  </Badge>
+                )}
                 {!t.active && <Badge>Pausado</Badge>}
               </div>
               <p className="mt-2 text-xs text-muted">
@@ -195,6 +203,15 @@ const FixedExpenses = ({ onAction }: { onAction: (m: ModalState) => void }) => {
               </p>
               {canEditOwner(t.ownerUserId) && (
                 <div className="mt-2 flex justify-end">
+                  {t.debtId ? (
+                    <IconButton
+                      label="Desvincular de la deuda"
+                      onClick={() => confirm('¿Desvincular de la deuda? Los abonos ya registrados se conservan.') && unlink.mutate(t.id)}
+                      icon={<Unlink className="size-4" />}
+                    />
+                  ) : (
+                    <IconButton label="Vincular a una deuda" onClick={() => onAction({ kind: 'link-debt', template: t })} icon={<HandCoins className="size-4" />} />
+                  )}
                   <IconButton label="Cambiar dueño" onClick={() => onAction({ kind: 'reassign-recurring', template: t })} icon={<UserRoundCog className="size-4" />} />
                   <IconButton label="Editar" onClick={() => onAction({ kind: 'recurring', template: t })} icon={<Pencil className="size-4" />} />
                   <IconButton
@@ -271,6 +288,10 @@ export const ExpensesPage = () => {
     ({ id, payload }: { id?: string; payload: unknown }) =>
       id ? api.put(`/recurring-expenses/${id}`, payload) : api.post('/recurring-expenses', payload),
     ['recurring-expenses', 'expenses'],
+  );
+  const linkDebt = useApiMutation(
+    ({ id, payload }: { id: string; payload: unknown }) => api.post(`/recurring-expenses/${id}/link-debt`, payload),
+    ['recurring-expenses', 'debts'],
   );
   const reassignTemplate = useApiMutation(
     ({ id, payload, apply }: { id: string; payload: unknown; apply: string }) =>
@@ -451,6 +472,18 @@ export const ExpensesPage = () => {
             onCancel={close}
             onSubmit={async (payload) => {
               await saveTemplate.mutateAsync({ id: modal.template?.id, payload });
+              close();
+            }}
+          />
+        )}
+      </Modal>
+      <Modal open={modal?.kind === 'link-debt'} onClose={close} title="Vincular gasto fijo a una deuda">
+        {modal?.kind === 'link-debt' && (
+          <LinkDebtForm
+            template={modal.template}
+            onCancel={close}
+            onSubmit={async (payload) => {
+              await linkDebt.mutateAsync({ id: modal.template.id, payload });
               close();
             }}
           />

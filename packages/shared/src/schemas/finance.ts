@@ -265,6 +265,26 @@ export const debtInputSchema = z.object({
 });
 export type DebtInput = z.input<typeof debtInputSchema>;
 
+/** Links a fixed expense to a loan: an existing debt or a new one created from it. */
+export const linkDebtInputSchema = z
+  .object({
+    debtId: optionalId,
+    newDebt: z
+      .object({
+        name: nameField,
+        type: z.enum(DEBT_TYPES).default('loan'),
+        /** Original amount (with past payments) or today's balance (without them). */
+        originalAmount: moneySchema,
+        interestRate: z.coerce.number().min(0).max(1000).nullable().optional(),
+        startDate: isoDateSchema,
+      })
+      .optional(),
+    /** Register the occurrences already paid as payments of the debt. */
+    includePastPayments: z.boolean().default(true),
+  })
+  .refine((v) => Boolean(v.debtId) !== Boolean(v.newDebt), { message: 'Elige una deuda existente o crea una nueva' });
+export type LinkDebtInput = z.input<typeof linkDebtInputSchema>;
+
 export const debtPaymentInputSchema = z.object({
   date: isoDateSchema,
   amount: moneySchema,

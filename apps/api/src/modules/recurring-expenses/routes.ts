@@ -1,5 +1,6 @@
 import {
   idParamsSchema,
+  linkDebtInputSchema,
   nextOccurrence,
   reassignInputSchema,
   recurringExpenseInputSchema,
@@ -9,7 +10,7 @@ import {
 import { and, eq, gte, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { accounts, categories, expenses, households, recurringExpenses, recurringExpenseSplits } from '../../db/schema';
+import { accounts, categories, debts, expenses, households, recurringExpenses, recurringExpenseSplits } from '../../db/schema';
 import { assertCanEdit, assertInHousehold, assertMembers, assertOwners, resolveOwner, resolveSplits, visibilityFilter } from '../../lib/access';
 import { writeAudit } from '../../lib/audit';
 import { addDays, todayIn, toIsoDate } from '../../lib/dates';
@@ -18,6 +19,7 @@ import { badRequest, notFound } from '../../lib/errors';
 import { currentUser, type AuthUser } from '../../plugins/auth';
 import type { Tx } from '../../db/client';
 import { reassignExpense, writeSplits } from '../expenses/service';
+import { syncDebtPayment } from '../debts/service';
 import { templateSchedule, upcomingDates } from './service';
 
 export const recurringExpenseRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -133,6 +135,68 @@ export const recurringExpenseRoutes: FastifyPluginAsyncZod = async (app) => {
     assertCanEdit(user, row.ownerUserId);
     return row;
   };
+
+  /**
+   * Links a fixed expense to a loan (existing or created here). From then on each paid occurrence
+   * is also a payment of the debt; optionally the occurrences already paid are registered too.
+   */
+  app.post(
+    '/recurring-expenses/:id/link-debt',
+    { preHandler: app.requireWriter, schema: { params: idParamsSchema, body: linkDebtInputSchema } },
+    async (request) => {
+      const user = currentUser(request);
+      const template = await findTemplate(user, request.params.id);
+      assertCanEdit(user, template.ownerUserId);
+      const input = request.body;
+      return db.transaction(async (tx) => {
+        let debtId = input.debtId ?? null;
+        if (debtId) {
+          const [debt] = await tx.select().from(debts).where(and(eq(debts.id, debtId), eq(debts.householdId, user.householdId)));
+          if (!debt) throw notFound('Deuda no encontrada');
+          if (debt.currency !== template.currency) throw badRequest(`La deuda está en ${debt.currency} y el gasto fijo en ${template.currency}`);
+        } else {
+          const d = input.newDebt!;
+          const [debt] = await tx
+            .insert(debts)
+            .values({
+              householdId: user.householdId,
+              ownerUserId: template.ownerUserId,
+              name: d.name,
+              type: d.type,
+              originalAmount: d.originalAmount,
+              currency: template.currency,
+              interestRate: d.interestRate == null ? null : String(d.interestRate),
+              minPayment: template.amount,
+              dueDay: template.dueDay,
+              startDate: d.startDate,
+            })
+            .returning({ id: debts.id });
+          debtId = debt!.id;
+        }
+        await tx.update(recurringExpenses).set({ debtId }).where(eq(recurringExpenses.id, template.id));
+        let registered = 0;
+        if (input.includePastPayments) {
+          // Oldest first, so each installment's interest uses the balance at that time.
+          const paid = await tx
+            .select()
+            .from(expenses)
+            .where(and(eq(expenses.recurringExpenseId, template.id), eq(expenses.status, 'paid')))
+            .orderBy(expenses.date);
+          for (const expense of paid) if (await syncDebtPayment(tx, debtId!, expense)) registered++;
+        }
+        return { debtId, registeredPayments: registered };
+      });
+    },
+  );
+
+  app.post('/recurring-expenses/:id/unlink-debt', { preHandler: app.requireWriter, schema: { params: idParamsSchema } }, async (request) => {
+    const user = currentUser(request);
+    const template = await findTemplate(user, request.params.id);
+    assertCanEdit(user, template.ownerUserId);
+    // Payments already registered stay in the debt.
+    await db.update(recurringExpenses).set({ debtId: null }).where(eq(recurringExpenses.id, template.id));
+    return { ok: true };
+  });
 
   /** Occurrences still to come (projections, not stored). */
   app.get(

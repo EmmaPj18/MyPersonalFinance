@@ -4,6 +4,7 @@ import type { DbOrTx, Tx } from '../../db/client';
 import { expenses, recurringExpenses, recurringExpenseSplits } from '../../db/schema';
 import { resolveSplits } from '../../lib/access';
 import { addDays } from '../../lib/dates';
+import { syncDebtPayment } from '../debts/service';
 import { writeSplits } from '../expenses/service';
 
 type RecurringExpense = typeof recurringExpenses.$inferSelect;
@@ -62,6 +63,8 @@ export const generateScheduledExpenses = async (tx: Tx, t: RecurringExpense, tod
       .returning();
     if (!expense) continue;
     if (splits.length) await writeSplits(tx, expense.id, expense.amount, splits);
+    // A loan installment also pays the linked debt.
+    if (t.debtId) await syncDebtPayment(tx, t.debtId, expense);
     created++;
   }
   if (t.generatedThrough !== today) {

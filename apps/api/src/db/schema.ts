@@ -15,6 +15,7 @@ import {
   uniqueIndex,
   uuid,
   varchar,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import {
   ACCOUNT_STATUSES,
@@ -408,6 +409,8 @@ export const recurringExpenses = pgTable(
     autoPay: boolean('auto_pay').notNull().default(true),
     /** Member who usually pays it (defaults to the owner, or whoever created it). */
     paidByUserId: uuid('paid_by_user_id').references(() => users.id),
+    /** Loan this fixed expense pays: each paid occurrence also registers a debt payment. */
+    debtId: uuid('debt_id').references((): AnyPgColumn => debts.id, { onDelete: 'set null' }),
     /** Last date already processed by the scheduler. */
     generatedThrough: date('generated_through'),
     createdAt: createdAt(),
@@ -603,7 +606,8 @@ export const debtPayments = pgTable('debt_payments', {
   amount: money('amount').notNull(),
   principalPortion: money('principal_portion').notNull(),
   interestPortion: money('interest_portion').notNull().default('0'),
-  expenseId: uuid('expense_id').references(() => expenses.id, { onDelete: 'set null' }),
+  /** Expense this payment comes from; deleting the expense removes the payment. */
+  expenseId: uuid('expense_id').references(() => expenses.id, { onDelete: 'cascade' }),
   createdAt: createdAt(),
 });
 
