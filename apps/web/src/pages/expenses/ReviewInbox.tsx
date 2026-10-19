@@ -6,17 +6,18 @@ import { CategorySelect, Money, OwnerSelect, type Ownership } from '../../compon
 import { Badge, Button, Card, CardHeader, Checkbox, EmptyState, ErrorBanner, Notice, Select, Spinner } from '../../components/ui';
 import { usePrefs } from '../../context/prefs';
 import { api } from '../../lib/api';
-import { formatDate } from '../../lib/format';
+import { formatDate, formatMoney } from '../../lib/format';
 import { useAccounts, useApiMutation, useInbox, useIncomeSources } from '../../lib/queries';
 import type { InboxItem } from '../../lib/types';
 
-const KIND_LABELS: Record<InboxKind, string> = { expense: 'Gasto', income: 'Ingreso', transfer: 'Transferencia', ignore: 'Ignorar' };
+const KIND_LABELS: Record<InboxKind, string> = { expense: 'Gasto', income: 'Ingreso', transfer: 'Transferencia', refund: 'Devolución', ignore: 'Ignorar' };
 
 interface Draft {
   kind: InboxKind;
   categoryId: string | null;
   incomeSourceId: string | null;
   transferAccountId: string | null;
+  refundExpenseId: string | null;
   owner: Ownership;
 }
 
@@ -25,6 +26,7 @@ const draftOf = (i: InboxItem): Draft => ({
   categoryId: i.categoryId,
   incomeSourceId: i.incomeSourceId,
   transferAccountId: i.transferAccountId,
+  refundExpenseId: i.refundExpenseId,
   owner: { scope: i.scope, ownerUserId: i.ownerUserId },
 });
 
@@ -89,6 +91,7 @@ export const ReviewInbox = () => {
           categoryId: d.categoryId,
           incomeSourceId: d.incomeSourceId,
           transferAccountId: d.transferAccountId,
+          refundExpenseId: d.kind === 'refund' ? d.refundExpenseId : null,
           scope: d.owner.scope,
           ownerUserId: d.owner.ownerUserId,
         };
@@ -96,7 +99,7 @@ export const ReviewInbox = () => {
     });
     setSelected(new Set());
     setNotice(
-      `Registrados: ${result.expense} gastos, ${result.income} ingresos, ${result.transfer} transferencias${result.ignore ? `; ${result.ignore} ignorados` : ''}.`,
+      `Registrados: ${result.expense} gastos, ${result.income} ingresos, ${result.transfer} transferencias${result.refund ? `, ${result.refund} devoluciones` : ''}${result.ignore ? `; ${result.ignore} ignorados` : ''}.`,
     );
   };
 
@@ -185,7 +188,7 @@ export const ReviewInbox = () => {
                       value={d.kind}
                       onChange={(e) => update(i.id, { kind: e.target.value as InboxKind })}
                     >
-                      {(Object.keys(KIND_LABELS) as InboxKind[]).map((k) => (
+                      {(Object.keys(KIND_LABELS) as InboxKind[]).filter((k) => k !== 'refund' || i.direction === 'credit').map((k) => (
                         <option key={k} value={k}>
                           {KIND_LABELS[k]}
                         </option>
@@ -236,6 +239,24 @@ export const ReviewInbox = () => {
                             ))}
                         </Select>
                       )}
+                      {d.kind === 'refund' &&
+                        (i.refundCandidates?.length ? (
+                          <Select
+                            aria-label={`Compra de la devolución ${i.description}`}
+                            className="!w-72"
+                            value={d.refundExpenseId ?? ''}
+                            onChange={(e) => update(i.id, { refundExpenseId: e.target.value || null })}
+                          >
+                            <option value="">La compra más reciente del comercio</option>
+                            {i.refundCandidates.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {formatDate(c.date)} · {c.description} · {formatMoney(c.amount, i.currency)}
+                              </option>
+                            ))}
+                          </Select>
+                        ) : (
+                          <span className="text-xs text-muted">Se resta de la compra del mismo comercio (regístrala antes o junto con esta).</span>
+                        ))}
                       {problem && <span className="text-xs text-warning">{problem}</span>}
                     </div>
                   </td>

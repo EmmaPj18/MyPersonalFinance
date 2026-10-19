@@ -22,7 +22,7 @@ import { badRequest, notFound } from '../../lib/errors';
 import { currentUser } from '../../plugins/auth';
 import { parseUpload, templateCsv, templateXlsx } from './files';
 import { normalizeRows, normalizeText, suggestMapping } from './normalize';
-import { addToInbox, commitInbox, reapplyRules } from './service';
+import { addToInbox, commitInbox, reapplyRules, refundCandidates } from './service';
 
 export const importRoutes: FastifyPluginAsyncZod = async (app) => {
   const { db } = app;
@@ -113,12 +113,20 @@ export const importRoutes: FastifyPluginAsyncZod = async (app) => {
     { preHandler: app.authenticate, schema: { querystring: z.object({ status: z.enum(['pending', 'imported', 'ignored']).default('pending') }) } },
     async (request) => {
       const user = currentUser(request);
-      return db
+      const rows = await db
         .select()
         .from(transactionInbox)
         .where(and(eq(transactionInbox.householdId, user.householdId), eq(transactionInbox.status, request.query.status)))
         .orderBy(desc(transactionInbox.date), desc(transactionInbox.createdAt))
         .limit(1000);
+      // Credits can be refunds: offer the purchases they may belong to.
+      return Promise.all(
+        rows.map(async (row) =>
+          row.direction === 'credit' && row.status === 'pending'
+            ? { ...row, refundCandidates: (await refundCandidates(db, user.householdId, row)).slice(0, 10) }
+            : row,
+        ),
+      );
     },
   );
 

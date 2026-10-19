@@ -74,7 +74,7 @@ describe('import and review', () => {
         { id: byText('NOMINA').id, kind: 'income', incomeSourceId: job.id },
       ],
     });
-    expect(result).toEqual({ expense: 1, income: 1, transfer: 1, ignore: 0 });
+    expect(result).toEqual({ expense: 1, income: 1, transfer: 1, ignore: 0, refund: 0 });
 
     // The rule was applied to the other pending grocery purchase.
     const rules = await owner.ok<any[]>('GET', '/categorization-rules');

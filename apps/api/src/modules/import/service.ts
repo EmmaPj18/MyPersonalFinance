@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Currency, Direction, InboxCommitItem, InboxKind, InboxSource, Scope } from '@mypersonalfinance/shared';
-import { and, between, eq, inArray, isNull, sql } from 'drizzle-orm';
+import Decimal from 'decimal.js';
+import { and, between, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { DbOrTx, Tx } from '../../db/client';
 import {
   accounts,
@@ -17,7 +18,8 @@ import { assertCanEdit, assertOwners, resolveSplits } from '../../lib/access';
 import { addDays } from '../../lib/dates';
 import { badRequest } from '../../lib/errors';
 import type { AuthUser } from '../../plugins/auth';
-import { writeSplits } from '../expenses/service';
+import { writeAudit } from '../../lib/audit';
+import { currentSplits, writeSplits } from '../expenses/service';
 import { writeEntryChildren } from '../income/service';
 import { normalizeText } from './normalize';
 
@@ -38,7 +40,7 @@ export interface IncomingTransaction {
   /** Unique id at the source (email message): dedupes instead of the content, so two equal purchases aren't merged. */
   dedupeKey?: string;
   /** Classification proposed by the source. Transfers and ignores win over the rules; the rest, only without a rule. */
-  suggestion?: { kind?: InboxKind; transferAccountId?: string | null; scope?: Scope; ownerUserId?: string | null };
+  suggestion?: { kind?: InboxKind; transferAccountId?: string | null; refundExpenseId?: string | null; scope?: Scope; ownerUserId?: string | null };
 }
 
 type Rule = typeof categorizationRules.$inferSelect;
@@ -51,6 +53,39 @@ export const matchRule = (rules: Rule[], description: string) => {
   const text = normalizeText(description);
   // Longest pattern first: the most specific rule wins.
   return [...rules].sort((a, b) => b.pattern.length - a.pattern.length).find((r) => r.pattern && text.includes(r.pattern)) ?? null;
+};
+
+/** How far back a refund looks for its purchase. */
+const REFUND_WINDOW_DAYS = 120;
+
+/**
+ * Purchases a refund may belong to: same currency, on or before its date, at least its amount,
+ * of the same merchant (or the same account and exact amount). Most recent first.
+ */
+export const refundCandidates = async (
+  db: DbOrTx,
+  householdId: string,
+  refund: { description: string; currency: Currency; date: string; amount: string; accountId: string | null },
+) => {
+  const rows = await db
+    .select({ id: expenses.id, description: expenses.description, date: expenses.date, amount: expenses.amount, accountId: expenses.accountId })
+    .from(expenses)
+    .where(
+      and(
+        eq(expenses.householdId, householdId),
+        eq(expenses.currency, refund.currency),
+        between(expenses.date, addDays(refund.date, -REFUND_WINDOW_DAYS), refund.date),
+        sql`${expenses.amount} >= ${refund.amount}`,
+      ),
+    )
+    .orderBy(desc(expenses.date))
+    .limit(500);
+  const merchant = patternFor(refund.description);
+  return rows.filter((e) => {
+    const other = patternFor(e.description);
+    const sameMerchant = merchant.length >= 3 && (other.includes(merchant) || merchant.includes(other)) && other.length >= 3;
+    return sameMerchant || (refund.accountId && e.accountId === refund.accountId && e.amount === refund.amount);
+  });
 };
 
 const hashOf = (householdId: string, t: IncomingTransaction) =>
@@ -100,7 +135,7 @@ export const addToInbox = async (
       categoryId: category?.id ?? null,
       transferAccountId: hint?.transferAccountId ?? null,
     };
-    const forced = hint?.kind === 'transfer' || hint?.kind === 'ignore';
+    const forced = hint?.kind === 'transfer' || hint?.kind === 'ignore' || hint?.kind === 'refund';
     if (rule && !category && !forced) {
       kind = rule.kind;
       classification = {
@@ -147,6 +182,7 @@ export const addToInbox = async (
         kind: duplicate ? 'ignore' : kind,
         ...classification,
         ruleId: rule && !category && !forced ? rule.id : null,
+        refundExpenseId: kind === 'refund' ? (hint?.refundExpenseId ?? null) : null,
         duplicateOfExpenseId: duplicate?.id ?? null,
         raw: t.raw ?? null,
         createdBy: user.id,
@@ -157,6 +193,39 @@ export const addToInbox = async (
     else duplicates++;
   }
   return { added, duplicates };
+};
+
+type InboxRow = typeof transactionInbox.$inferSelect;
+
+/**
+ * Takes a refund off its purchase: the expense keeps the rest, or is removed when the whole
+ * amount came back. Returns the expense that remains (null when removed).
+ */
+const applyRefund = async (tx: Tx, user: AuthUser, row: InboxRow, chosenId: string | null, description: string) => {
+  const targetId = chosenId ?? (await refundCandidates(tx, user.householdId, row))[0]?.id;
+  if (!targetId) throw badRequest(`No encontré la compra de "${description}": regístrala primero o márcala como Ignorar`);
+  const [expense] = await tx.select().from(expenses).where(and(eq(expenses.id, targetId), eq(expenses.householdId, user.householdId)));
+  if (!expense) throw badRequest('Compra de la devolución inválida');
+  assertCanEdit(user, expense.ownerUserId);
+  if (expense.currency !== row.currency) throw badRequest(`La devolución de "${description}" está en ${row.currency} y la compra en ${expense.currency}`);
+  const rest = new Decimal(expense.amount).minus(row.amount);
+  if (rest.isNegative()) throw badRequest(`La devolución de "${description}" es mayor que la compra elegida`);
+  await writeAudit(tx, {
+    householdId: user.householdId,
+    userId: user.id,
+    entity: 'expense',
+    entityId: expense.id,
+    action: 'refund',
+    before: { amount: expense.amount },
+    after: { amount: rest.toFixed(2), refund: row.amount, date: row.date, inboxId: row.id },
+  });
+  if (rest.isZero()) {
+    await tx.delete(expenses).where(eq(expenses.id, expense.id));
+    return null;
+  }
+  await tx.update(expenses).set({ amount: rest.toFixed(2) }).where(eq(expenses.id, expense.id));
+  if (expense.scope === 'shared') await writeSplits(tx, expense.id, rest.toFixed(2), await currentSplits(tx, expense.id));
+  return expense.id;
 };
 
 /** Creates the expense / income / transfer of each reviewed transaction (or ignores it). */
@@ -171,9 +240,11 @@ export const commitInbox = async (tx: Tx, user: AuthUser, items: InboxCommitItem
   const sources = await tx.select().from(incomeSources).where(eq(incomeSources.householdId, hid));
   const accs = await tx.select().from(accounts).where(eq(accounts.householdId, hid));
   const catIds = new Set((await tx.select({ id: categories.id }).from(categories).where(eq(categories.householdId, hid))).map((c) => c.id));
-  const counts = { expense: 0, income: 0, transfer: 0, ignore: 0 };
+  const counts = { expense: 0, income: 0, transfer: 0, ignore: 0, refund: 0 };
 
-  for (const item of items) {
+  // Refunds last: their purchase may be registered in this same batch.
+  const ordered = [...items].sort((a, b) => Number(a.kind === 'refund') - Number(b.kind === 'refund'));
+  for (const item of ordered) {
     const row = rows.find((r) => r.id === item.id)!;
     const description = item.description ?? row.description;
     const accountId = item.accountId === undefined ? row.accountId : item.accountId;
@@ -238,6 +309,8 @@ export const commitInbox = async (tx: Tx, user: AuthUser, items: InboxCommitItem
         .values({ householdId: hid, fromAccountId: from, toAccountId: to, date: row.date, amount: row.amount, currency: row.currency, description, createdBy: user.id })
         .returning({ id: accountTransfers.id });
       done.transferId = transfer!.id;
+    } else if (item.kind === 'refund') {
+      done.refundExpenseId = await applyRefund(tx, user, row, item.refundExpenseId ?? null, description);
     }
     counts[item.kind]++;
     await tx
@@ -252,7 +325,8 @@ export const commitInbox = async (tx: Tx, user: AuthUser, items: InboxCommitItem
       })
       .where(eq(transactionInbox.id, row.id));
 
-    if (remember) {
+    // A rule would turn the merchant's next purchases into refunds.
+    if (remember && item.kind !== 'refund') {
       const pattern = patternFor(description);
       if (pattern.length >= 3) {
         const rule = {
@@ -279,7 +353,15 @@ export const reapplyRules = async (db: DbOrTx, householdId: string) => {
   const pending = await db
     .select()
     .from(transactionInbox)
-    .where(and(eq(transactionInbox.householdId, householdId), eq(transactionInbox.status, 'pending'), isNull(transactionInbox.categoryId), isNull(transactionInbox.duplicateOfExpenseId)));
+    .where(
+      and(
+        eq(transactionInbox.householdId, householdId),
+        eq(transactionInbox.status, 'pending'),
+        ne(transactionInbox.kind, 'refund'),
+        isNull(transactionInbox.categoryId),
+        isNull(transactionInbox.duplicateOfExpenseId),
+      ),
+    );
   for (const p of pending) {
     const rule = matchRule(rules, p.description);
     if (!rule) continue;

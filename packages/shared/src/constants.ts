@@ -96,8 +96,12 @@ export type InboxSource = (typeof INBOX_SOURCES)[number];
 export const INBOX_STATUSES = ['pending', 'imported', 'ignored'] as const;
 export type InboxStatus = (typeof INBOX_STATUSES)[number];
 /** What a reviewed transaction becomes. */
-export const INBOX_KINDS = ['expense', 'income', 'transfer', 'ignore'] as const;
+/** `refund`: money returned for a purchase; it reduces the original expense. */
+export const INBOX_KINDS = ['expense', 'income', 'transfer', 'ignore', 'refund'] as const;
 export type InboxKind = (typeof INBOX_KINDS)[number];
+/** What a remembered rule can classify as (a refund always needs its own purchase). */
+export const RULE_KINDS = ['expense', 'income', 'transfer', 'ignore'] as const;
+export type RuleKind = (typeof RULE_KINDS)[number];
 export const DIRECTIONS = ['debit', 'credit'] as const;
 export type Direction = (typeof DIRECTIONS)[number];
 

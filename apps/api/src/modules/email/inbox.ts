@@ -5,7 +5,7 @@ import { accounts, accountTransfers, transactionInbox, users } from '../../db/sc
 import { addDays } from '../../lib/dates';
 import type { AuthUser } from '../../plugins/auth';
 import { normalizeText } from '../import/normalize';
-import { addToInbox, type IncomingTransaction } from '../import/service';
+import { addToInbox, refundCandidates, type IncomingTransaction } from '../import/service';
 import { BANKS, parseBankEmail, type ParsedBankEmail } from './banks';
 import type { EmailContent } from './text';
 
@@ -112,7 +112,10 @@ export const importBankEmails = async (db: DbOrTx, user: AuthUser, emails: Email
     const ownership = owner ? { scope: 'personal' as const, ownerUserId: owner } : { scope: 'shared' as const, ownerUserId: null };
     let suggestion: IncomingTransaction['suggestion'] = ownership;
 
-    if (tx.type === 'withdrawal') {
+    if (tx.type === 'refund') {
+      const [purchase] = await refundCandidates(db, hid, { description: tx.description, currency, date: tx.date, amount: tx.amount, accountId: account?.id ?? null });
+      suggestion = { ...ownership, kind: 'refund', refundExpenseId: purchase?.id ?? null };
+    } else if (tx.type === 'withdrawal') {
       const cash = accs.find((a) => a.type === 'cash' && a.currency === currency);
       if (cash) suggestion = { ...ownership, kind: 'transfer', transferAccountId: cash.id };
     } else if (tx.type === 'transfer_out' && own && !counterpart) {

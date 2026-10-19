@@ -26,7 +26,9 @@ export type EmailTxType =
   /** Payment received on a credit card. */
   | 'card_payment'
   /** Salary deposit. */
-  | 'payroll';
+  | 'payroll'
+  /** Money returned for a purchase (merchandise return, reversal). */
+  | 'refund';
 
 export interface ParsedBankEmail {
   bank: BankId;
@@ -52,18 +54,20 @@ type Parser = (email: EmailContent) => ParsedBankEmail | null;
 
 const flat = (text: string) => text.replace(/\s*\n\s*/g, ' ');
 const approved = (status: string | undefined) => !status || /aprobad|approved/i.test(status);
+/** Words banks use for money returned to a card. */
+const REFUND = /retorno|devoluci|reverso|reversi|reembolso|refund|nota de cr[eé]dito/i;
 const clean = (s: string | null | undefined) => (s ?? '').replace(/\s+/g, ' ').replace(/\s*\|\s*/g, ' ').trim();
 
 const popular: Parser = ({ subject, text }) => {
   const f = flat(text);
   // Consumption / withdrawal: "Monto | Moneda | Fecha | Comercio | Estatus" table.
   const row = f.match(/([A-Z$]*\$?\s?[\d,]+\.\d{2})\s*\|\s*([^|]+?)\s*\|\s*(\d{1,2}\/\d{1,2}\/\d{4})\s*\|\s*([^|]+?)\s*\|\s*([^|\s]+)/);
-  if (row && /consumo|retiro/i.test(subject)) {
+  if (row && /consumo|retiro|devoluci|reverso/i.test(subject)) {
     if (!approved(row[5])) return null;
     const withdrawal = /retiro/i.test(subject) || /cajero/i.test(f);
     return {
       bank: 'popular',
-      type: withdrawal ? 'withdrawal' : 'purchase',
+      type: REFUND.test(subject) ? 'refund' : withdrawal ? 'withdrawal' : 'purchase',
       amount: parseAmount(row[1]!)!,
       currency: parseCurrency(row[2]) ?? parseCurrency(row[1]),
       date: parseDate(row[3]!)!,
@@ -117,7 +121,7 @@ const bhd: Parser = ({ text }) => {
     const withdrawal = /retiro|avance/.test(kind);
     return {
       bank: 'bhd',
-      type: withdrawal ? 'withdrawal' : 'purchase',
+      type: REFUND.test(kind) ? 'refund' : withdrawal ? 'withdrawal' : 'purchase',
       amount: parseAmount(card[3]!)!,
       currency: parseCurrency(card[2]),
       date: parseDate(card[1]!)!,
@@ -208,13 +212,17 @@ const santacruz: Parser = ({ text }) => {
       counterpartName: sender || null,
     };
   }
-  const kind = text.match(/NOTIFICACI[OÓ]N DE (\w+)/i)?.[1]?.toLowerCase();
+  // "NOTIFICACIÓN DE consumo", "… DE retiro", "… DE Retorno Mercancia".
+  const kind = text.match(/NOTIFICACI[OÓ]N DE ([^\n]+)/i)?.[1]?.trim().toLowerCase();
   if (!kind || !approved(field(text, /Estado/i) ?? undefined)) return null;
   const place = clean(field(text, /Lugar de transacci[oó]n/i));
   const withdrawal = kind.startsWith('retiro');
+  const type = REFUND.test(kind) ? 'refund' : withdrawal ? 'withdrawal' : /consumo|compra/.test(kind) ? 'purchase' : null;
+  // A kind we don't know isn't guessed as a purchase.
+  if (!type) return null;
   return {
     bank: 'santacruz',
-    type: withdrawal ? 'withdrawal' : 'purchase',
+    type,
     amount: parseAmount(amount)!,
     currency: parseCurrency(amount),
     date,
@@ -230,6 +238,8 @@ const scotiabank: Parser = ({ text, receivedAt }) => {
   let m = f.match(/authorization for (\$?[\d,]+\.\d{2}\s*[A-Z]{3})\s+at\s+(.+?)\s+on your .*?\*{2,}(\d{4})/i)
     ?? f.match(/autorizaci[oó]n (?:por|de) (\$?[\d,]+\.\d{2}\s*[A-Z]{3})\s+en\s+(.+?)\s+(?:con|en) su .*?\*{2,}(\d{4})/i);
   if (m) return { bank: 'scotiabank', type: 'purchase', ...money(m[1]!), date, description: clean(m[2]), last4: m[3]! };
+  m = f.match(/(?:refund|credit) (?:for|of) (\$?[\d,]+\.\d{2}\s*[A-Z]{3})\s+(?:from|at)\s+(.+?)\s+(?:on|to) your .*?\*{2,}(\d{4})/i);
+  if (m) return { bank: 'scotiabank', type: 'refund', ...money(m[1]!), date, description: clean(m[2]), last4: m[3]! };
   m = f.match(/payment to your .*?\*{2,}(\d{4}) for (\$?[\d,]+\.\d{2}\s*[A-Z]{0,3})/i) ?? f.match(/pago a su .*?\*{2,}(\d{4}) por (\$?[\d,]+\.\d{2}\s*[A-Z]{0,3})/i);
   if (m) return { bank: 'scotiabank', type: 'card_payment', ...money(m[2]!), date, description: 'Pago a tarjeta de crédito', last4: m[1]! };
   m = f.match(/cr[eé]dito a su cuenta \*{2,}(\d{4}) por (?:un )?(.+?) realizado desde (.+?) por valor de (\$?[\d,]+\.\d{2}\s*[A-Z]{0,3})/i);
