@@ -71,6 +71,13 @@
       "when": 1792306968286,
       "tag": "0009_live_default_splits",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792381480854,
+      "tag": "0010_bank_emails",
+      "breakpoints": true
     }
   ]
 }

@@ -37,10 +37,10 @@ export const request = async <T>(method: string, path: string, body?: unknown, q
   return data as T;
 };
 
-/** Sends a file as multipart/form-data. */
-const upload = async <T>(path: string, file: File): Promise<T> => {
+/** Sends files as multipart/form-data. */
+const upload = async <T>(path: string, file: File | File[]): Promise<T> => {
   const form = new FormData();
-  form.append('file', file);
+  for (const f of Array.isArray(file) ? file : [file]) form.append(Array.isArray(file) ? 'files' : 'file', f);
   const res = await fetch(`/api${path}`, { method: 'POST', credentials: 'include', body: form });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, data.error ?? 'ERROR', data.message ?? 'Error');

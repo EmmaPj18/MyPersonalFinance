@@ -3,6 +3,8 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import Fastify, { type FastifyServerOptions } from 'fastify';
 import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod';
+import { emailRoutes } from './modules/email/routes';
+import { fetchBankEmails, verifyMailbox, type BankEmailFetcher, type MailboxVerifier } from './modules/email/imap';
 import type { Config } from './config';
 import type { Database } from './db/client';
 import { accountRoutes } from './modules/accounts/routes';
@@ -27,6 +29,8 @@ declare module 'fastify' {
   interface FastifyInstance {
     config: Config;
     db: Database;
+    /** IMAP access (replaced in tests). */
+    mailbox: { verify: MailboxVerifier; fetch: BankEmailFetcher };
   }
 }
 
@@ -34,20 +38,23 @@ export interface BuildAppOptions {
   config: Config;
   db: Database;
   logger?: FastifyServerOptions['logger'];
+  mailbox?: { verify: MailboxVerifier; fetch: BankEmailFetcher };
 }
 
-export const buildApp = async ({ config, db, logger = true }: BuildAppOptions) => {
+export const buildApp = async ({ config, db, logger = true, mailbox = { verify: verifyMailbox, fetch: fetchBankEmails } }: BuildAppOptions) => {
   const app = Fastify({ logger, trustProxy: true }).withTypeProvider<ZodTypeProvider>();
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
   app.decorate('config', config);
   app.decorate('db', db);
+  app.decorate('mailbox', mailbox);
 
   await app.register(errorsPlugin);
   await app.register(cors, { origin: config.WEB_ORIGIN, credentials: true });
   await app.register(cookie, { secret: config.SESSION_SECRET });
-  await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
+  // Several files only for bank emails (.eml).
+  await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024, files: 50 } });
   await app.register(authPlugin);
 
   app.get('/api/health', async () => ({ status: 'ok' }));
@@ -69,6 +76,7 @@ export const buildApp = async ({ config, db, logger = true }: BuildAppOptions) =
       await api.register(reportRoutes);
       await api.register(importRoutes);
       await api.register(transferRoutes);
+      await api.register(emailRoutes);
     },
     { prefix: '/api' },
   );

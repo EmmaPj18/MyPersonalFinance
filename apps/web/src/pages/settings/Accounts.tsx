@@ -17,6 +17,7 @@ const AccountForm = ({ initial, onSubmit, onCancel }: { initial?: Account; onSub
     currency: (initial?.currency ?? me.defaultCurrency) as Currency,
     ownerUserId: initial ? initial.ownerUserId : (me.id as string | null),
     openingBalance: initial?.openingBalance ?? '0',
+    identifiers: initial?.identifiers ?? '',
     archived: initial?.archived ?? false,
   });
   const [error, setError] = useState<unknown>(null);
@@ -25,7 +26,7 @@ const AccountForm = ({ initial, onSubmit, onCancel }: { initial?: Account; onSub
     e.preventDefault();
     setSaving(true);
     try {
-      await onSubmit(f);
+      await onSubmit({ ...f, identifiers: f.identifiers.trim() || null });
     } catch (err) {
       setError(err);
       setSaving(false);
@@ -50,6 +51,13 @@ const AccountForm = ({ initial, onSubmit, onCancel }: { initial?: Account; onSub
         <Field label="De quién es">{(id) => <NullableOwnerSelect id={id} value={f.ownerUserId} onChange={(ownerUserId) => setF({ ...f, ownerUserId })} />}</Field>
         <Field label="Moneda">{(id) => <CurrencySelect id={id} value={f.currency} onChange={(currency) => setF({ ...f, currency })} />}</Field>
         <Field label="Saldo inicial">{(id) => <MoneyInput id={id} value={f.openingBalance} onChange={(e) => setF({ ...f, openingBalance: e.target.value })} />}</Field>
+        <Field
+          label="Terminaciones (opcional)"
+          hint="Últimos 4 dígitos de la cuenta y de sus tarjetas, separados por coma (ej. 7610, 4010). Para Wise escribe «wise». Sirve para asociar los correos del banco."
+          className="sm:col-span-2"
+        >
+          {(id) => <Input id={id} placeholder="7610, 4010" value={f.identifiers} onChange={(e) => setF({ ...f, identifiers: e.target.value })} />}
+        </Field>
       </div>
       {initial && <Checkbox label="Archivada" checked={f.archived} onChange={(e) => setF({ ...f, archived: e.target.checked })} />}
       <div className="flex justify-end gap-2">
@@ -94,6 +102,7 @@ export const AccountsSettings = () => {
                   <Badge>{ACCOUNT_TYPE_LABELS[a.type]}</Badge>
                   <OwnerBadge scope={a.ownerUserId ? 'personal' : 'shared'} ownerUserId={a.ownerUserId} />
                   {a.missingRate && <Badge tone="warning">Faltan tasas</Badge>}
+                  {a.identifiers && <span>· {a.identifiers}</span>}
                 </div>
               </div>
               <Money value={a.balance} currency={a.currency} className="font-semibold" />

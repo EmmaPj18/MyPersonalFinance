@@ -65,6 +65,8 @@ export interface Account {
   currency: Currency;
   ownerUserId: string | null;
   openingBalance: string;
+  /** Last digits of its cards/account numbers, to match bank emails. */
+  identifiers: string | null;
   balance: string;
   missingRate: boolean;
   archived: boolean;

@@ -35,6 +35,10 @@ export interface IncomingTransaction {
   owner?: string;
   account?: string;
   raw?: unknown;
+  /** Unique id at the source (email message): dedupes instead of the content, so two equal purchases aren't merged. */
+  dedupeKey?: string;
+  /** Classification proposed by the source. Transfers and ignores win over the rules; the rest, only without a rule. */
+  suggestion?: { kind?: InboxKind; transferAccountId?: string | null; scope?: Scope; ownerUserId?: string | null };
 }
 
 type Rule = typeof categorizationRules.$inferSelect;
@@ -51,7 +55,11 @@ export const matchRule = (rules: Rule[], description: string) => {
 
 const hashOf = (householdId: string, t: IncomingTransaction) =>
   createHash('sha256')
-    .update([householdId, t.accountId ?? '', t.date, t.amount, t.currency, t.direction, normalizeText(t.description)].join('|'))
+    .update(
+      t.dedupeKey
+        ? [householdId, t.dedupeKey].join('|')
+        : [householdId, t.accountId ?? '', t.date, t.amount, t.currency, t.direction, normalizeText(t.description)].join('|'),
+    )
     .digest('hex');
 
 /**
@@ -84,13 +92,16 @@ export const addToInbox = async (
     const category = byName(cats, t.category);
     const owner = t.owner && normalizeText(t.owner) !== 'hogar' ? byName(members.filter((m) => m.status === 'active'), t.owner) : undefined;
 
-    let kind: InboxKind = t.direction === 'debit' ? 'expense' : 'income';
+    const hint = t.suggestion;
+    let kind: InboxKind = hint?.kind ?? (t.direction === 'debit' ? 'expense' : 'income');
     let classification: { categoryId?: string | null; incomeSourceId?: string | null; transferAccountId?: string | null; scope: Scope; ownerUserId: string | null } = {
-      scope: owner ? 'personal' : 'shared',
-      ownerUserId: owner?.id ?? null,
+      scope: owner ? 'personal' : (hint?.scope ?? 'shared'),
+      ownerUserId: owner?.id ?? (hint?.scope === 'personal' ? (hint.ownerUserId ?? null) : null),
       categoryId: category?.id ?? null,
+      transferAccountId: hint?.transferAccountId ?? null,
     };
-    if (rule && !category) {
+    const forced = hint?.kind === 'transfer' || hint?.kind === 'ignore';
+    if (rule && !category && !forced) {
       kind = rule.kind;
       classification = {
         categoryId: rule.categoryId,
@@ -135,7 +146,7 @@ export const addToInbox = async (
         accountId,
         kind: duplicate ? 'ignore' : kind,
         ...classification,
-        ruleId: rule && !category ? rule.id : null,
+        ruleId: rule && !category && !forced ? rule.id : null,
         duplicateOfExpenseId: duplicate?.id ?? null,
         raw: t.raw ?? null,
         createdBy: user.id,

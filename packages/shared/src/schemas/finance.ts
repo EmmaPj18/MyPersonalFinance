@@ -36,6 +36,8 @@ export const accountInputSchema = z.object({
   /** Null = shared account. */
   ownerUserId: optionalId,
   openingBalance: moneySchema.default('0'),
+  /** Last digits of its cards/account numbers, comma separated, to match bank emails. */
+  identifiers: z.string().trim().max(120).nullable().optional(),
   archived: z.boolean().optional(),
 });
 export type AccountInput = z.input<typeof accountInputSchema>;
@@ -396,3 +398,22 @@ export const transferInputSchema = z
   })
   .refine((v) => v.fromAccountId !== v.toAccountId, { message: 'Las cuentas deben ser distintas', path: ['toAccountId'] });
 export type TransferInput = z.input<typeof transferInputSchema>;
+
+/** Mailbox read for bank notifications (Gmail: imap.gmail.com and an app password). */
+export const emailConnectionInputSchema = z.object({
+  host: z.string().trim().min(1).max(255).default('imap.gmail.com'),
+  port: z.coerce.number().int().min(1).max(65535).default(993),
+  username: z.string().trim().min(1).max(255),
+  password: z.string().min(1).max(255),
+  mailbox: z.string().trim().min(1).max(255).default('INBOX'),
+  /** Emails received before this date are not read. */
+  sinceDate: isoDateSchema,
+});
+export type EmailConnectionInput = z.input<typeof emailConnectionInputSchema>;
+
+export const emailConnectionUpdateSchema = z.object({
+  active: z.boolean().optional(),
+  password: z.string().min(1).max(255).optional(),
+  mailbox: z.string().trim().min(1).max(255).optional(),
+  sinceDate: isoDateSchema.optional(),
+});
