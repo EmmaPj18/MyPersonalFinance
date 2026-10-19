@@ -1,4 +1,4 @@
-import type { InboxKind } from '@mypersonalfinance/shared';
+import type { RuleKind } from '@mypersonalfinance/shared';
 import { Plus, Trash2 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { CategorySelect, OwnerBadge } from '../../components/finance';
@@ -7,7 +7,7 @@ import { usePrefs } from '../../context/prefs';
 import { api } from '../../lib/api';
 import { useAccounts, useApiMutation, useCategories, useIncomeSources, useRules } from '../../lib/queries';
 
-const KIND_LABELS: Record<InboxKind, string> = { expense: 'Gasto', income: 'Ingreso', transfer: 'Transferencia', ignore: 'Ignorar' };
+const KIND_LABELS: Record<RuleKind, string> = { expense: 'Gasto', income: 'Ingreso', transfer: 'Transferencia', ignore: 'Ignorar' };
 
 /** "When the description contains…" rules used to pre-classify imported transactions. */
 export const RulesSettings = () => {
@@ -16,7 +16,7 @@ export const RulesSettings = () => {
   const categories = useCategories();
   const sources = useIncomeSources();
   const accounts = useAccounts();
-  const [form, setForm] = useState({ pattern: '', kind: 'expense' as InboxKind, categoryId: null as string | null });
+  const [form, setForm] = useState({ pattern: '', kind: 'expense' as RuleKind, categoryId: null as string | null });
   const create = useApiMutation((payload: unknown) => api.post('/categorization-rules', payload), ['rules', 'inbox']);
   const remove = useApiMutation((id: string) => api.del(`/categorization-rules/${id}`), ['rules']);
 
@@ -65,7 +65,7 @@ export const RulesSettings = () => {
       {canWrite && (
         <form onSubmit={submit} className="flex flex-wrap gap-2 border-t border-border p-4 sm:px-5">
           <Input aria-label="Texto de la regla" placeholder="Ej. supermercado nacional" required minLength={2} className="min-w-48 flex-1" value={form.pattern} onChange={(e) => setForm({ ...form, pattern: e.target.value })} />
-          <Select aria-label="Tipo" className="!w-auto" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as InboxKind })}>
+          <Select aria-label="Tipo" className="!w-auto" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as RuleKind })}>
             <option value="expense">Gasto</option>
             <option value="ignore">Ignorar</option>
           </Select>

@@ -2,20 +2,21 @@ import type {
   AccountStatus,
   AccountType,
   BudgetLineKind,
-  FxPreferredSource,
-  FxSide,
-  ImportMapping,
-  InboxKind,
   Currency,
   DebtType,
   DeductionCategory,
   ExpenseNature,
   ExpenseStatus,
+  FxPreferredSource,
+  FxSide,
+  ImportMapping,
+  InboxKind,
   IncomeKind,
   IncomeSourceType,
   PayFrequency,
   PrivacyMode,
   RecurrenceFrequency,
+  RuleKind,
   Scope,
   UserRole,
   WeekendRule,
@@ -132,13 +133,17 @@ export interface InboxItem {
   ownerUserId: string | null;
   ruleId: string | null;
   duplicateOfExpenseId: string | null;
+  /** Refunds: the purchase it returns money for. */
+  refundExpenseId: string | null;
+  /** Credits: purchases it may be a refund of (most recent first). */
+  refundCandidates?: { id: string; description: string; date: string; amount: string }[];
   status: 'pending' | 'imported' | 'ignored';
 }
 
 export interface CategorizationRule {
   id: string;
   pattern: string;
-  kind: InboxKind;
+  kind: RuleKind;
   categoryId: string | null;
   incomeSourceId: string | null;
   transferAccountId: string | null;

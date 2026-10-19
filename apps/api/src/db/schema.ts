@@ -716,6 +716,8 @@ export const transactionInbox = pgTable(
     scope: scopeEnum('scope').notNull().default('shared'),
     ownerUserId: uuid('owner_user_id').references(() => users.id),
     ruleId: uuid('rule_id').references(() => categorizationRules.id, { onDelete: 'set null' }),
+    /** Refunds: the purchase it returns money for. */
+    refundExpenseId: uuid('refund_expense_id').references(() => expenses.id, { onDelete: 'set null' }),
     /** Existing expense that looks like the same transaction. */
     duplicateOfExpenseId: uuid('duplicate_of_expense_id').references(() => expenses.id, { onDelete: 'set null' }),
     raw: jsonb('raw'),

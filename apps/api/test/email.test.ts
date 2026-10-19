@@ -95,6 +95,44 @@ describe('bank emails', () => {
     expect((await uploadEmails(me, { 'x.csv': 'a;b' })).status).toBe(400);
   });
 
+  it('takes refunds off their purchase', async () => {
+    const me = await registerUser(ctx, 'Devoluciones');
+    const card = await me.ok<{ id: string }>('POST', '/accounts', { name: 'Visa USD', type: 'credit_card', currency: 'USD', identifiers: '1212' });
+    const santaCruz = (id: string, kind: string, amount: string, day: string) =>
+      eml(
+        id,
+        'notificaciones@bsc.com.do',
+        'Notificacion, Banco Santa Cruz',
+        `<p>NOTIFICACIÓN DE ${kind}</p><p>Te notificamos que desde tu tarjeta de Crédito terminada en 1212 fue realizada la siguiente transacción:</p>
+         <p>Monto: USD ${amount}</p><p>Lugar de transacción: WWW.TIENDA.COM +1415 US</p><p>Fecha y hora: ${day}/10/2026 10:00:00</p><p>Estado: Aprobada</p>`,
+      );
+    const commitAll = async (remember = true) => {
+      const pending = await me.ok<any[]>('GET', '/inbox');
+      return me.ok('POST', '/inbox/commit', { remember, items: pending.map((i) => ({ id: i.id, kind: i.kind, refundExpenseId: i.refundExpenseId, scope: 'personal', ownerUserId: me.me.id })) });
+    };
+
+    // Purchase and its partial refund in the same review: the purchase is registered first.
+    await uploadEmails(me, { 'a.eml': santaCruz('buy1', 'consumo', '100.00', '10'), 'b.eml': santaCruz('ret1', 'Retorno Mercancia', '8.21', '14') });
+    const [refund] = (await me.ok<any[]>('GET', '/inbox')).filter((i) => i.kind === 'refund');
+    expect(refund).toMatchObject({ direction: 'credit', amount: '8.21', accountId: card.id });
+    expect(await commitAll()).toMatchObject({ expense: 1, refund: 1 });
+    let [purchase] = await me.ok<any[]>('GET', '/expenses?month=2026-10');
+    expect(purchase).toMatchObject({ amount: '91.79', description: 'WWW.TIENDA.COM +1415 US' });
+
+    // A later refund finds the registered purchase; the remembered rule didn't turn it into an expense.
+    await uploadEmails(me, { 'c.eml': santaCruz('ret2', 'Retorno Mercancia', '91.79', '16') });
+    const [second] = await me.ok<any[]>('GET', '/inbox');
+    expect(second).toMatchObject({ kind: 'refund', refundExpenseId: purchase.id });
+    expect(second.refundCandidates.map((c: any) => c.id)).toEqual([purchase.id]);
+    // The whole amount back cancels the purchase.
+    await commitAll();
+    expect(await me.ok<any[]>('GET', '/expenses?month=2026-10')).toHaveLength(0);
+
+    // Without a purchase to take it from, it can't be registered.
+    await uploadEmails(me, { 'd.eml': santaCruz('ret3', 'Retorno Mercancia', '5.00', '17') });
+    expect((await me.post('/inbox/commit', { items: (await me.ok<any[]>('GET', '/inbox')).map((i) => ({ id: i.id, kind: 'refund' })) })).status).toBe(400);
+  });
+
   it('reads a connected mailbox without exposing the password', async () => {
     const me = await registerUser(ctx, 'Buzon');
     await account(me, 'Popular Visa', '1111');

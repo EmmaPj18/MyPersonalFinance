@@ -7,6 +7,7 @@ import {
   EXPENSE_NATURES,
   EXPENSE_STATUSES,
   INBOX_KINDS,
+  RULE_KINDS,
   INCOME_KINDS,
   INCOME_SOURCE_TYPES,
   PAY_FREQUENCIES,
@@ -364,6 +365,8 @@ export const inboxCommitItemSchema = z.object({
   scope: scopeSchema.default('shared'),
   ownerUserId: optionalId,
   description: z.string().trim().min(1).max(255).optional(),
+  /** Refunds: the purchase it returns money for (otherwise the latest one of the same merchant). */
+  refundExpenseId: optionalId,
 });
 export type InboxCommitItem = z.input<typeof inboxCommitItemSchema>;
 
@@ -377,7 +380,7 @@ export const inboxIgnoreSchema = z.object({ ids: z.array(uuidSchema).min(1).max(
 
 export const categorizationRuleInputSchema = z.object({
   pattern: z.string().trim().min(2).max(255),
-  kind: z.enum(INBOX_KINDS),
+  kind: z.enum(RULE_KINDS),
   categoryId: optionalId,
   incomeSourceId: optionalId,
   transferAccountId: optionalId,

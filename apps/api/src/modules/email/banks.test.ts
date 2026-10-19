@@ -148,6 +148,26 @@ describe('bank email parsers', () => {
       { type: 'purchase', amount: '300.00', currency: 'DOP', date: '2026-10-18', description: 'CAFETERIA EJEMPLO DO', last4: '1212' },
     ],
     [
+      'Santa Cruz merchandise return',
+      email('notificaciones@bsc.com.do', 'Notificación, Banco Santa Cruz', `
+        NOTIFICACIÓN DE Retorno Mercancia
+        Te notificamos que desde tu tarjeta de Crédito Platino terminada en 1212 fue realizada la siguiente transacción:
+        Monto: USD 8.21
+        Lugar de transacción: TIENDA ONLINE US
+        Fecha y hora: 14/10/2026 10:56:57
+        Estado: Aprobada`),
+      { type: 'refund', amount: '8.21', currency: 'USD', date: '2026-10-14', description: 'TIENDA ONLINE US', last4: '1212' },
+    ],
+    [
+      'Santa Cruz notification of an unknown kind',
+      email('notificaciones@bsc.com.do', 'Notificación, Banco Santa Cruz', `
+        NOTIFICACIÓN DE cambio de PIN
+        Monto: RD$ 0.01
+        Fecha y hora: 14/10/2026 10:56:57
+        Estado: Aprobada`),
+      null,
+    ],
+    [
       'Scotiabank card purchase (date from the email)',
       email('alerts@scotiabank.com', 'Credit Card used', `
         There was an authorization for $40.00 DOP at FARMACIA-123 on your Scotiabank Credit Card ***1313 at 04:31 pm AST .`, '2026-06-19T02:00:00.000Z'),
