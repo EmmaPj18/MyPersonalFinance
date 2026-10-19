@@ -4,6 +4,7 @@ import { createDb } from './db/client';
 import { runMigrations } from './db/migrate';
 import { runFxSync } from './jobs/fx';
 import { runRecurring } from './jobs/recurring';
+import { runEmailSync } from './modules/email/sync';
 import { startScheduler } from './jobs/scheduler';
 
 const config = loadConfig();
@@ -20,6 +21,7 @@ const stopScheduler = startScheduler(
     { name: 'recurring', everyMinutes: 60, run: (tx) => runRecurring(tx) },
     // BCRD publishes once per business day; Infodolar changes during the day.
     { name: 'fx', everyMinutes: 360, run: (tx) => runFxSync(tx) },
+    { name: 'email', everyMinutes: 15, run: (tx) => runEmailSync(tx, config.SESSION_SECRET) },
   ],
   app.log,
 );

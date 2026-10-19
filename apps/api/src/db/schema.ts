@@ -198,6 +198,8 @@ export const accounts = pgTable(
     type: accountTypeEnum('type').notNull(),
     currency: currencyEnum('currency').notNull(),
     openingBalance: money('opening_balance').notNull().default('0'),
+    /** Last digits of its cards/account numbers ("1234, 5678"), or a bank name, to match bank emails. */
+    identifiers: varchar('identifiers', { length: 120 }),
     archived: boolean('archived').notNull().default(false),
     createdAt: createdAt(),
   },
@@ -729,4 +731,30 @@ export const transactionInbox = pgTable(
     index('transaction_inbox_status_idx').on(t.householdId, t.status, t.date),
     check('transaction_inbox_amount_positive', sql`${t.amount} > 0`),
   ],
+);
+
+// ---------------------------------------------------------------- bank emails
+
+/** A member's mailbox (IMAP) read for bank notifications; they land in their household's inbox. */
+export const emailConnections = pgTable(
+  'email_connections',
+  {
+    id: id(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    host: varchar('host', { length: 255 }).notNull(),
+    port: integer('port').notNull().default(993),
+    username: varchar('username', { length: 255 }).notNull(),
+    /** AES-256-GCM, see lib/secrets. */
+    passwordEnc: text('password_enc').notNull(),
+    mailbox: varchar('mailbox', { length: 255 }).notNull().default('INBOX'),
+    /** Emails received before this date are not read. */
+    sinceDate: date('since_date').notNull(),
+    active: boolean('active').notNull().default(true),
+    lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+    lastError: text('last_error'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('email_connections_user_idx').on(t.userId)],
 );

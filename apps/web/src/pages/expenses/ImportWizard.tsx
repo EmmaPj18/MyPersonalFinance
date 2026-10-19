@@ -34,19 +34,21 @@ interface Preview {
 export const ImportWizard = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
   const { me } = usePrefs();
   const qc = useQueryClient();
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const file = files[0] ?? null;
+  const emails = files.length > 0 && files.every((f) => /\.eml$/i.test(f.name));
   const [parsed, setParsed] = useState<ParsedImport | null>(null);
   const [mapping, setMapping] = useState<ImportMapping | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [currency, setCurrency] = useState<Currency>(me.defaultCurrency);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [profileName, setProfileName] = useState('');
-  const [result, setResult] = useState<{ added: number; duplicates: number; errors: unknown[] } | null>(null);
+  const [result, setResult] = useState<{ added: number; duplicates: number; errors?: unknown[]; skipped?: { subject: string }[] } | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
   const reset = () => {
-    setFile(null);
+    setFiles([]);
     setParsed(null);
     setMapping(null);
     setPreview(null);
@@ -71,8 +73,16 @@ export const ImportWizard = ({ open, onClose }: { open: boolean; onClose: () => 
     }
   };
 
+  /** Bank notifications go straight to the inbox. */
+  const sendEmails = () =>
+    run(async () => {
+      setResult(await api.upload('/import/email', files));
+      await qc.invalidateQueries({ queryKey: ['inbox'] });
+    });
+
   const read = () =>
     run(async () => {
+      if (files.length > 1) throw new Error('Varios archivos solo se pueden subir si todos son correos (.eml)');
       const res = await api.upload<ParsedImport>('/import/parse', file!);
       setParsed(res);
       setMapping(res.suggested);
@@ -101,7 +111,7 @@ export const ImportWizard = ({ open, onClose }: { open: boolean; onClose: () => 
     });
 
   return (
-    <Modal open={open} onClose={close} title="Importar gastos desde Excel o CSV" wide>
+    <Modal open={open} onClose={close} title="Importar movimientos (Excel, CSV o correos)" wide>
       <div className="flex flex-col gap-4">
         <ErrorBanner error={error} />
         {result ? (
@@ -109,7 +119,8 @@ export const ImportWizard = ({ open, onClose }: { open: boolean; onClose: () => 
             <Notice tone="primary">
               {result.added} transacciones agregadas a "Por revisar".
               {result.duplicates > 0 && ` ${result.duplicates} ya estaban importadas y se omitieron.`}
-              {result.errors.length > 0 && ` ${result.errors.length} filas no se pudieron leer.`}
+              {(result.errors?.length ?? 0) > 0 && ` ${result.errors!.length} filas no se pudieron leer.`}
+              {(result.skipped?.length ?? 0) > 0 && ` ${result.skipped!.length} correos no son notificaciones de transacciones que sepamos leer.`}
             </Notice>
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={reset}>
@@ -121,8 +132,8 @@ export const ImportWizard = ({ open, onClose }: { open: boolean; onClose: () => 
         ) : !parsed ? (
           <>
             <p className="text-sm text-muted">
-              Sube el estado de cuenta exportado de tu banco (.xlsx o .csv) o la plantilla de MyPersonalFinance. Las transacciones no se registran hasta
-              que las revises.
+              Sube el estado de cuenta exportado de tu banco (.xlsx o .csv), la plantilla de MyPersonalFinance o correos de notificación del banco
+              (.eml, puedes elegir varios). Las transacciones no se registran hasta que las revises.
             </p>
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <FileSpreadsheet className="size-4 text-muted" aria-hidden />
@@ -136,12 +147,18 @@ export const ImportWizard = ({ open, onClose }: { open: boolean; onClose: () => 
               </a>
             </div>
             <Field label="Archivo">
-              {(id) => <Input id={id} type="file" accept=".xlsx,.csv,.txt" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />}
+              {(id) => <Input id={id} type="file" multiple accept=".xlsx,.csv,.txt,.eml" onChange={(e) => setFiles([...(e.target.files ?? [])])} />}
             </Field>
             <div className="flex justify-end">
-              <Button icon={<Upload className="size-4" />} disabled={!file} loading={busy} onClick={read}>
-                Leer archivo
-              </Button>
+              {emails ? (
+                <Button icon={<Upload className="size-4" />} loading={busy} onClick={sendEmails}>
+                  Enviar {files.length === 1 ? 'correo' : `${files.length} correos`} a "Por revisar"
+                </Button>
+              ) : (
+                <Button icon={<Upload className="size-4" />} disabled={!file} loading={busy} onClick={read}>
+                  Leer archivo
+                </Button>
+              )}
             </div>
           </>
         ) : (

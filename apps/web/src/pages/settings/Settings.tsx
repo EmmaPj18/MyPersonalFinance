@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { PageHeader, Segmented } from '../../components/ui';
 import { AccountsSettings } from './Accounts';
 import { CatalogSettings } from './Catalogs';
+import { EmailSettings } from './EmailConnections';
 import { FxRatesSettings } from './FxRates';
 import { HouseholdSettings } from './Household';
 import { ProfileSettings } from './Profile';
 import { RulesSettings } from './Rules';
 import { TransfersSettings } from './Transfers';
 
-type Tab = 'profile' | 'household' | 'accounts' | 'catalogs' | 'fx';
+type Tab = 'profile' | 'household' | 'accounts' | 'email' | 'catalogs' | 'fx';
 
 export const SettingsPage = () => {
   const [tab, setTab] = useState<Tab>('profile');
@@ -24,6 +25,7 @@ export const SettingsPage = () => {
             { value: 'profile', label: 'Perfil' },
             { value: 'household', label: 'Hogar' },
             { value: 'accounts', label: 'Cuentas' },
+            { value: 'email', label: 'Correo' },
             { value: 'catalogs', label: 'Categorías y descuentos' },
             { value: 'fx', label: 'Tasas de cambio' },
           ]}
@@ -37,6 +39,7 @@ export const SettingsPage = () => {
           <TransfersSettings />
         </div>
       )}
+      {tab === 'email' && <EmailSettings />}
       {tab === 'catalogs' && (
         <div className="flex flex-col gap-6">
           <CatalogSettings />

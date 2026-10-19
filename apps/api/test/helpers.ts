@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll } from 'vitest';
-import { buildApp, type App } from '../src/app';
+import { buildApp, type App, type BuildAppOptions } from '../src/app';
 import { createDb } from '../src/db/client';
 
 export interface TestContext {
@@ -8,13 +8,14 @@ export interface TestContext {
 }
 
 /** Builds the app against the test database for one test file. */
-export const setupApp = () => {
+export const setupApp = (options: Pick<BuildAppOptions, 'mailbox'> = {}) => {
   const ctx = {} as TestContext;
   let pool: { end: () => Promise<void> };
   beforeAll(async () => {
     const created = createDb(process.env.TEST_DATABASE_URL!);
     pool = created.pool;
     ctx.app = await buildApp({
+      ...options,
       db: created.db,
       logger: false,
       config: {
